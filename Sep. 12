@@ -1,0 +1,137 @@
+# Load necessary libraries
+library(dplyr)
+library(stargazer)
+
+# Filter the dataset to include only rows where Democracy Score (polity2) is not missing
+filtered_data <- combined_data %>%
+  filter(!is.na(polity2))
+
+# Select the relevant columns from the filtered dataset
+selected_vars <- filtered_data %>%
+  select(demonstration, smart_sanctions, trade_sanctions, polity2, has_un, has_us)
+
+# Calculate descriptive statistics including the number of observations
+descriptive_stats <- selected_vars %>%
+  summarise(
+    Mean_Protest = mean(demonstration, na.rm = TRUE),
+    SD_Protest = sd(demonstration, na.rm = TRUE),
+    Min_Protest = min(demonstration, na.rm = TRUE),
+    Max_Protest = max(demonstration, na.rm = TRUE),
+    Median_Protest = median(demonstration, na.rm = TRUE),
+    N_Protest = sum(!is.na(demonstration)),  # Count of non-missing values
+    
+    Mean_Smart = mean(smart_sanctions, na.rm = TRUE),
+    SD_Smart = sd(smart_sanctions, na.rm = TRUE),
+    Min_Smart = min(smart_sanctions, na.rm = TRUE),
+    Max_Smart = max(smart_sanctions, na.rm = TRUE),
+    Median_Smart = median(smart_sanctions, na.rm = TRUE),
+    N_Smart = sum(!is.na(smart_sanctions)),
+    
+    Mean_Trade = mean(trade_sanctions, na.rm = TRUE),
+    SD_Trade = sd(trade_sanctions, na.rm = TRUE),
+    Min_Trade = min(trade_sanctions, na.rm = TRUE),
+    Max_Trade = max(trade_sanctions, na.rm = TRUE),
+    Median_Trade = median(trade_sanctions, na.rm = TRUE),
+    N_Trade = sum(!is.na(trade_sanctions)),
+    
+    Mean_Democracy_Score = mean(polity2, na.rm = TRUE),
+    SD_Democracy_Score = sd(polity2, na.rm = TRUE),
+    Min_Democracy_Score = min(polity2, na.rm = TRUE),
+    Max_Democracy_Score = max(polity2, na.rm = TRUE),
+    Median_Democracy_Score = median(polity2, na.rm = TRUE),
+    N_Democracy_Score = sum(!is.na(polity2)),
+    
+    Mean_UN = mean(has_un, na.rm = TRUE),
+    SD_UN = sd(has_un, na.rm = TRUE),
+    Min_UN = min(has_un, na.rm = TRUE),
+    Max_UN = max(has_un, na.rm = TRUE),
+    Median_UN = median(has_un, na.rm = TRUE),
+    N_UN = sum(!is.na(has_un)),
+    
+    Mean_US = mean(has_us, na.rm = TRUE),
+    SD_US = sd(has_us, na.rm = TRUE),
+    Min_US = min(has_us, na.rm = TRUE),
+    Max_US = max(has_us, na.rm = TRUE),
+    Median_US = median(has_us, na.rm = TRUE),
+    N_US = sum(!is.na(has_us))
+  )
+
+# Transpose the summary to have variables in rows for better presentation
+descriptive_stats_transposed <- t(descriptive_stats)
+
+# Create a LaTeX table using stargazer
+stargazer(descriptive_stats_transposed, 
+          type = "latex", 
+          title = "Descriptive Statistics for Selected Variables (Filtered by Democracy Score)",
+          summary = FALSE,
+          rownames = TRUE,
+          out = "descriptive_stats_filtered.tex") # Output file name
+
+
+
+
+######Marginal effects#####
+
+#  (is_authoritarian == 1)
+authoritarian_data <- combined_data[combined_data$is_authoritarian == 1, ]
+
+
+model_A <- glm.nb(demonstration ~ lag(demonstration, 2) + smart_sanctions + trade_sanctions + polity2 + I(polity2^2) + delta01_transformed + delta05_transformed + delta06_transformed + 
+                    delta26_transformed + delta31_transformed + delta32_transformed,                                data = authoritarian_data, link = log)
+
+
+summary(model_A)
+
+
+
+
+# 결과 요약
+summary(model_A)
+summary(authoritarian_model1)
+summary(authoritarian_smart)
+summary(authoritarian_trade)
+
+vif(authoritarian_model)
+
+
+
+
+################
+
+# lag 
+authoritarian_data <- authoritarian_data %>%
+  mutate(lag_demonstration = dplyr::lag(demonstration, 2))  # dplyr 패키지의 lag 함수 사용
+
+model_A <- glm.nb(demonstration ~ lag_demonstration + smart_sanctions + trade_sanctions + polity2 + I(polity2^2) + 
+                        delta01_transformed + delta05_transformed + delta06_transformed + 
+                        delta26_transformed + delta31_transformed + delta32_transformed, 
+                      data = authoritarian_data, link = log)
+
+# Marginal Effects 
+mf_A<- margins(model_A)
+
+# 결과 출력
+summary(mf_A)
+
+
+
+########
+library(ggplot2)
+library(margins)
+
+# Marginal Effects 
+marginal_effects_summary <- summary(marginal_effects_smart)
+
+# Marginal Effects 값을 로그 변환하여 축소
+marginal_effects_summary$log_AME <- log(abs(marginal_effects_summary$AME) + 1)  # 로그 변환
+marginal_effects_summary$log_lower <- log(abs(marginal_effects_summary$lower) + 1)
+marginal_effects_summary$log_upper <- log(abs(marginal_effects_summary$upper) + 1)
+
+ggplot(marginal_effects_summary, aes(x = factor, y = log_AME)) +
+  geom_point(size = 3) +  # 점 그래프
+  geom_errorbar(aes(ymin = log_lower, ymax = log_upper), width = 0.2) +  # 신뢰 구간을 표시하는 에러바
+  theme_minimal() +  # 깔끔한 테마
+  labs(title = "Log Transformed Marginal Effects of Variables", x = "Variables", y = "Log(Average Marginal Effect)") +  # 제목 및 축 레이블
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))  # x축 텍스트 각도 조정
+
+vif(model)
