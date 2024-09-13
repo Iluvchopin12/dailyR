@@ -1,0 +1,29 @@
+library(readr)
+
+exam <- read_csv("C:/Users/user/OneDrive - University of Illinois - Urbana/R/R/Doit_R-master/Doit_R-master/Data/csv_exam.csv") 
+
+head(exam)  
+
+head(exam, 10)
+
+tail(exam)
+
+tail(exam, 10)
+
+View(exam)
+
+dim(exam) #dimension
+
+str(exam) #structure
+
+summary(exam)
+
+library(ggplot2)
+
+data(mpg)
+head(mpg)
+tail(mpg)
+View(mpg)
+dim(mpg)
+str(mpg)
+summary(mpg)
