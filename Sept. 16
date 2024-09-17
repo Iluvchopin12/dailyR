@@ -1,0 +1,81 @@
+Second Week (Sept. 16 ~ Sept. 20)
+
+16th rename(), derived variable(conditional statements, nested conditional statements),
+
+ 
+
+{r}
+df_raw <- data.frame(var1 = c(1,2,1),
+                     var2 = c(2,3,2))
+df_raw
+
+
+library(dplyr)
+
+df_new <- df_raw
+df_new
+
+df_new <- rename(df_new, v2 = var2)
+df_new
+
+df_new <- rename(df_new, v1 = var1)
+df_new
+
+library(ggplot2)
+data(mpg)
+
+A <- mpg
+head(A)
+
+A <- rename(A, city = cty, 
+            highway = hwy)
+
+names(A)
+
+Derived variable
+
+{r}
+
+df <- data.frame(var1 = c(4,3,8),
+                 var2 = c(2, 6,1))
+df
+
+df$var_sum <- df$var1 + df$var2; df
+
+df$var_mean <- df$var_sum/2
+df
+
+mpg$total <- (mpg$cty + mpg$hwy)/2
+head(mpg)
+
+mean(mpg$total)
+
+
+
+conditional functions
+
+{r}
+summary(mpg$total)
+hist(mpg$total)
+boxplot(mpg$total)
+
+mpg$test <- ifelse(mpg$total > 20, "pass", "fail")
+
+head(mpg, 20)
+table(mpg$test)
+qplot(mpg$test)
+
+#Nested conditional statements 
+# A >= 30, B 20~29, C < 20 
+
+mpg$grade <- ifelse(mpg$total >= 30, "A",
+                    ifelse(mpg$total <30 & mpg$total >=20, "B", "C"))
+
+head(mpg$grade, 10)
+table(mpg$grade)
+qplot(mpg$grade)
+
+mpg$grade2 <- ifelse(mpg$total >= 30, "A", 
+                     ifelse(mpg$total >=25, "B",
+                            ifelse(mpg$total >20, "C", "D")))
+table(mpg$grade2)
