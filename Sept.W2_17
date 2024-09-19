@@ -1,0 +1,111 @@
+Second Week (Sept. 16 ~ Sept. 20)
+17th Data pre-processing(filter(), select()
+
+{r}
+library(dplyr)
+library(haven)
+library(readr)
+exam <- read_csv("C:/Users/user/OneDrive - University of Illinois - Urbana/R/R/Doit_R-master/Doit_R-master/Data/csv_exam.csv")
+
+head(exam, 6)
+
+exam %>% filter(class == 1)
+
+exam %>% filter(class == 2)
+
+exam %>% filter(class != 1)
+exam %>% filter(class != 3)
+
+exam %>% filter(math > 50)
+exam %>% filter(math < 50)
+exam %>% filter(english >= 80)
+exam %>% filter(english <= 80)
+
+exam %>% filter(class == 1 & 
+                  math >= 50)
+
+exam %>% filter(class == 2, english >= 80)
+
+
+#vertical bar, or 
+
+exam %>% filter(math >= 90 | english >= 90)
+
+exam %>%  filter(english < 90 | science < 50)
+
+exam %>%  filter(class == 1 | class == 3 | class == 5)
+
+#matching operator 
+exam %>% filter(class %in% c(1,3,5))
+
+class1 <- exam %>% 
+  filter(class == 1)
+
+class2 <- exam %>% 
+  filter(class == 2)
+
+mean(class1$math)
+mean(class2$math)
+
+library(ggplot2)
+data(mpg)
+
+names(mpg)
+
+dspl4 <- mpg %>%
+  filter(displ <= 4)
+
+dspl5 <- mpg %>% 
+  filter(displ >= 5)
+
+head(dspl4$hwy, 6)
+mean(dspl4$hwy)
+mean(dspl5$hwy)
+
+
+audi <- mpg %>% filter(
+  manufacturer == "audi"
+)
+
+toyota <- mpg %>% 
+  filter(manufacturer == "toyota")
+
+
+mean(audi$cty)
+mean(toyota$cty)
+
+cfh <- mpg %>% 
+  filter(manufacturer %in% c("chevolet", "ford", "hond"))
+mean(cfh$hwy)
+
+
+
+exam %>% select(math)
+exam %>% select(english)
+exam %>% select(class, math, english)
+
+exam %>% select(-math)
+exam %>% select(-math, -english)
+
+exam %>% 
+  filter(class == 1) %>% 
+  select(english)
+
+
+exam %>% 
+  select(id, math) %>% 
+  head
+
+exam %>% 
+  select(id, math) %>% 
+  head(10)
+
+data <- mpg %>% 
+  select(class, cty)
+  
+head(data)
+
+data_suv <- data %>% 
+  filter(class == "suv"); mean(data_suv$cty) 
+data_compact <- data %>% 
+  filter(class == "compact"); mean(data_compact$cty) 
