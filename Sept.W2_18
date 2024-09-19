@@ -1,0 +1,57 @@
+Second Week (Sept. 16 ~ Sept. 20)
+
+18th Data pre-processing(arrange(), mutate(), summrise())
+
+
+{r} 
+
+#ascending order
+
+exam %>% 
+  arrange(math)
+
+#descending order
+
+exam %>% 
+  arrange(desc(math))
+
+exam %>% 
+  arrange(class, math)
+
+mpg %>% 
+  filter(manufacturer == "audi") %>% 
+  arrange(desc(hwy)) %>% 
+           head(5)
+
+#mutate, derived variable
+exam %>% 
+  mutate(total = math + english + science) %>% 
+  head
+
+exam %>% 
+  mutate(total = math + english + science,
+         mean = (math + english + science)/3) %>% 
+           head(3)
+
+exam %>% 
+  mutate(test = ifelse(science >= 60, "pass", "fail")) %>% 
+  head
+
+exam %>% 
+  mutate(total = math + english + science,
+         mean = (total/3),
+         test = ifelse(mean > 90, "pass", "fail") )
+
+exam %>% 
+  mutate(total = math + english + science) %>% 
+  arrange(desc(total)) %>% 
+  head
+
+
+mpg_total <- mpg %>% 
+  mutate(total = cty + hwy,
+         mean = total/2) %>% 
+  arrange(desc(mean)) %>% 
+  head(3)
+
+mpg_total
