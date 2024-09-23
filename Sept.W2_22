@@ -1,0 +1,53 @@
+22nd making graphs (scatter plot, bar chart)
+
+{r}
+library(ggplot2)
+library(dplyr)
+data(mpg)
+
+ggplot(data = mpg, aes(x = displ, y = hwy)) + #data, aesthetic mappings
+  geom_point() + #kinds of graph
+  xlim(3, 6) +
+  ylim(10, 30)
+
+ggplot(data = mpg, aes(x = cty, y = hwy)) + 
+  geom_point()
+
+ggplot(data = midwest, aes(x = poptotal, y = popasian)) +
+  geom_point() + 
+  xlim(0, 500000) +
+  ylim(0, 10000)
+
+#bar chart
+df_mpg <- mpg %>% 
+  group_by(drv) %>% 
+  summarise(mean_hwy = mean(hwy))
+df_mpg
+
+ggplot(data = df_mpg, aes(x = drv, y = mean_hwy)) +
+  geom_col()
+
+ggplot(data = df_mpg, aes(x = reorder(drv, -mean_hwy), y = mean_hwy)) + 
+         geom_col()
+
+ggplot(data = mpg, aes(x = drv)) + 
+  geom_bar()
+
+ggplot(data = mpg, aes(x = hwy)) + 
+  geom_bar()
+
+names(mpg)
+
+suv_mpg <- mpg %>% 
+  group_by(manufacturer) %>% 
+  filter(class == "suv") %>% 
+  summarise(mean_cty = mean(cty))
+
+ggplot(data = suv_mpg, aes(x = manufacturer, y = mean_cty)) + 
+  geom_col()
+
+ggplot(data = suv_mpg, aes(x = reorder(manufacturer, -mean_cty), y = mean_cty)) + geom_col()
+
+
+ggplot(data = mpg, aes(x = class)) +
+  geom_bar()
