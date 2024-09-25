@@ -1,0 +1,809 @@
+---
+title: "Daily R"
+format: pdf
+editor: visual
+---
+
+## Third Week (Sept. 23 \~ Sept. 29)
+
+-   24th practice
+
+    ```{r}
+
+    library(ggplot2)
+    library(dplyr)
+
+    kow <- kow %>% 
+      mutate(ageg = ifelse(age < 30, "young",
+                           ifelse(age <=59, "middle", "old")))
+
+    table(kow$ageg)
+
+    ageg_income <- kow %>% 
+      filter(!is.na(income)) %>% 
+      group_by(ageg) %>% 
+      summarise(mean_income = mean(income))
+
+    ageg_income
+
+    ggplot(data = ageg_income, aes(x = ageg, y = mean_income)) +
+      geom_col()
+
+    #in alphabetical order
+
+    ggplot(ageg_income, aes(x = ageg, y = mean_income)) +
+      geom_col() +
+      scale_x_discrete(limits = c("young", "middle", "old"))
+
+
+    #age group, gender, income
+
+    names(kow)
+    sex_income <- kow %>% 
+      filter(!is.na(income)) %>% 
+      group_by(ageg, sex) %>% 
+      summarise(mean_income = mean(income))
+
+    sex_income
+
+    ggplot(data = sex_income, aes(x = ageg, y = mean_income, fill = sex)) +
+      geom_col() +
+      scale_x_discrete(limits = c("young", "middle", "old"))
+
+    ggplot(data = sex_income, aes(x = ageg, y = mean_income, fill = sex)) +
+      geom_col(position = "dodge") +
+      scale_x_discrete(limits = c("young", "middle", "old"))
+
+
+    sex_age <- kow %>% 
+      filter(!is.na(income)) %>% 
+      group_by(age, sex) %>% 
+      summarise(mean_income = mean(income))
+
+    ggplot(data = sex_age, aes(x = age, y = mean_income, col = sex)) +
+      geom_line()
+    ```
+
+-   23rd making graph (Line Chart, box plot)
+
+    ```{r}
+    library(ggplot2)
+    library(dplyr)
+
+
+    data(economics)
+
+    ggplot(data = economics, aes(x = date, y = unemploy)) + 
+      geom_line()
+
+    ggplot(data = economics, aes(x = date, y = psavert)) + 
+      geom_line()
+
+    ggplot(data = mpg, aes(x = drv, y = hwy)) + 
+      geom_boxplot()
+
+    mpg3 <- mpg %>% 
+      filter(class %in% c("compact", "subcompact", "suv"))
+
+    ggplot(data = mpg3, aes(x = class, y = cty)) +
+      geom_boxplot()
+
+    names(Koweps_hpc10_2015_beta1)
+
+    library(foreign)
+    library(dplyr)
+    library(ggplot2)
+    library(readxl)
+
+    kow <- Koweps_hpc10_2015_beta1
+    head(kow)
+    str(kow)
+
+    kow <- rename(kow,
+                  sex = h10_g3,
+                  birth = h10_g4,
+                  marriage = h10_g10,
+                  religion = h10_g11,
+                  income = p1002_8aq1,
+                  code_job = h10_eco9,
+                  code_region = h10_reg7)
+
+    class(kow$sex)
+    table(kow$sex)
+
+    kow$sex <- ifelse(kow$sex == 1, "male", "female")
+    table(kow$sex)
+
+    class(kow$income)
+    summary(kow$income)
+    qplot(kow$income)
+    qplot(kow$income) + xlim(0, 1000)
+
+    kow$income <- ifelse(kow$income %in% c(0, 9999), NA, kow$income)
+    table(is.na(kow$income))
+
+    sex_income <- kow %>% 
+      filter(!is.na(income)) %>% 
+      group_by(sex) %>% 
+      summarise(mean_income = mean(income))
+    sex_income
+
+    ggplot(data = kow, aes(x = sex, y = income)) + 
+      geom_col()
+
+    #age and income
+
+    class(kow$birth)
+    qplot(kow$birth)
+
+    summary(kow$birth)
+    kow$age <- 2015 - kow$birth + 1
+    summary(kow$age)
+
+    age_income <- kow %>% 
+      filter(!is.na(income)) %>% 
+      group_by(age) %>% 
+      summarise(mean_income = mean(income))
+
+    head(age_income)
+    ggplot(data = age_income, aes(x = age, y= mean_income)) +
+      geom_line()
+    ```
+
+## Second Week (Sept. 16 \~ Sept. 22)
+
+-   22nd making graphs (scatter plot, bar chart)
+
+    ```{r}
+    library(ggplot2)
+    library(dplyr)
+    data(mpg)
+
+    ggplot(data = mpg, aes(x = displ, y = hwy)) + #data, aesthetic mappings
+      geom_point() + #kinds of graph
+      xlim(3, 6) +
+      ylim(10, 30)
+
+    ggplot(data = mpg, aes(x = cty, y = hwy)) + 
+      geom_point()
+
+    ggplot(data = midwest, aes(x = poptotal, y = popasian)) +
+      geom_point() + 
+      xlim(0, 500000) +
+      ylim(0, 10000)
+
+    #bar chart
+    df_mpg <- mpg %>% 
+      group_by(drv) %>% 
+      summarise(mean_hwy = mean(hwy))
+    df_mpg
+
+    ggplot(data = df_mpg, aes(x = drv, y = mean_hwy)) +
+      geom_col()
+
+    ggplot(data = df_mpg, aes(x = reorder(drv, -mean_hwy), y = mean_hwy)) + 
+             geom_col()
+
+    ggplot(data = mpg, aes(x = drv)) + 
+      geom_bar()
+
+    ggplot(data = mpg, aes(x = hwy)) + 
+      geom_bar()
+
+    names(mpg)
+
+    suv_mpg <- mpg %>% 
+      group_by(manufacturer) %>% 
+      filter(class == "suv") %>% 
+      summarise(mean_cty = mean(cty))
+
+    ggplot(data = suv_mpg, aes(x = manufacturer, y = mean_cty)) + 
+      geom_col()
+
+    ggplot(data = suv_mpg, aes(x = reorder(manufacturer, -mean_cty), y = mean_cty)) + geom_col()
+
+
+    ggplot(data = mpg, aes(x = class)) +
+      geom_bar()
+    ```
+
+-   21st finding outlier
+
+    ```{r}
+    library(dplyr)
+    outlier <- data.frame(sex = c(1,2,1,3,2,1),     ##range 1~2
+                           score = c(5,4,3,4,2,6))  ##range 1~5
+    outlier
+
+    table(outlier$sex)
+    table(outlier$score)
+
+    #if the vlaue of sex is 3, treat it as NA
+
+    outlier$sex <- ifelse(outlier$sex == 3, NA, outlier$sex)
+    outlier
+
+    outlier$score <- ifelse(outlier$score >5, NA, outlier$score); outlier
+
+    outlier %>% 
+      filter(!is.na(sex) & !is.na(score)) %>% 
+      group_by(sex) %>% 
+      summarise(mean = mean(score))
+
+
+    boxplot(mpg$hwy)
+    boxplot(mpg$hwy)$stats
+
+    mpg$hwy <- ifelse(mpg$hwy < 12 | mpg$hwy > 37, NA, mpg$hwy)
+    table(is.na(mpg$hwy))
+
+    mpg %>% 
+      group_by(drv) %>% 
+      summarise(mean_hwy = mean(hwy, na.rm = T)) %>% 
+      arrange(desc(mean_hwy))
+
+    ##practice
+
+    mpg <- as.data.frame(ggplot2::mpg)
+    #drv consists of 4, f, r
+
+    names(mpg)
+    mpg[c(10, 14, 58, 93), "drv"] <- "k"
+    mpg[c(29, 43, 129, 203), "cty"] <- c(3, 4, 39, 42)
+
+    #q1
+    table(mpg$drv)
+    mpg$drv <- ifelse(mpg$drv %in% c("4", "f", "r"), mpg$drv, NA)
+
+
+
+    #q2
+    boxplot(mpg$cty)
+    boxplot(mpg$cty)$stats
+
+    mpg$cty <- ifelse(mpg$cty < 9 | mpg$cty > 26, NA, mpg$cty)
+      
+    boxplot(mpg$cty)
+
+
+    #q3
+    mpg %>% 
+      filter(!is.na(cty) & !is.na(drv)) %>% 
+      group_by(drv) %>% 
+      summarise(mean = mean(cty))
+    ```
+
+-   20th Review, process missing value
+
+    ```{r}
+    library(ggplot2)
+    library(dplyr)
+    data(midwest)
+    mw <- midwest
+
+    names(mw)
+    mw <- mw %>% 
+      mutate(rate_adol = (poptotal - popadults)/poptotal)
+
+    mw %>% 
+      mutate(rate_adol = (poptotal - popadults)/poptotal) %>% 
+      select(rate_adol, county) %>% 
+      arrange(desc(rate_adol)) %>% 
+      head(5)
+      
+
+    mw <- mw %>% 
+      mutate(grade = ifelse(rate_adol >= 0.4, "large", 
+                            ifelse(rate_adol < 0.4 & rate_adol >= 0.3, "middle", "small")))
+
+
+    table(mw$grade)
+
+
+    mw %>% 
+      mutate(rate_asia = popasian / poptotal) %>% 
+      select(rate_asia, state, county) %>% 
+      arrange(rate_asia)
+
+
+    ### missing value
+    df <- data.frame(sex = c("M", "F", NA, "M", "F"),
+                     score = c(5, 4, 3, 4, NA))
+    df
+
+    is.na(df)
+    table(is.na(df))
+    table(is.na(df$sex))
+    table(is.na(df$score))
+    mean(df$scroe)
+    sum(df$score)
+
+    df %>% filter(is.na(score))
+    df %>% filter(!is.na(score))
+
+    df_nomiss <- df %>% filter(!is.na(score));df_nomiss
+    sum(df_nomiss$score)
+
+    df_nomiss <- df %>% filter(!is.na(score) & !is.na(sex))
+    df_nomiss
+
+    df_nomiss2 <- na.omit(df)
+    df_nomiss2
+
+    mean(df$score, na.rm = T)
+    sum(df$score, na.rm = T)
+
+    exam[c(3, 8, 15), "math"] <- NA
+    exam
+
+    exam %>% 
+      summarise(mean_math = mean(math))
+
+    exam %>% 
+      summarise(mean_math = mean(math, na.rm = T))
+
+    exam %>% summarise(mean_math = mean(math, na.rm = T),
+                       sum_math = sum(math, na.rm = T), 
+                       median_math = median(math, na.rm = T))
+
+    mean(exam$math, na.rm = T)
+
+    exam$math <- ifelse(is.na(exam$math), 55, exam$math)
+    table(is.na(exam$math))
+
+    exam
+
+
+    mean(exam$math)
+
+    mpg[c(65, 124, 131, 153, 212), "hwy"] <- NA
+
+    table(is.na(mpg$hwy))
+    table(is.na(mpg$drv))
+
+    mpg %>% 
+      filter(!is.na(hwy)) %>% 
+      group_by(drv) %>% 
+      summarise(mean = mean(hwy))
+
+    mpg %>% 
+      group_by(drv) %>% 
+      summarise(mean = mean(hwy, na.rm = T))
+
+
+    ```
+
+-   19th Data pre-processing(summarise(), group_by()), left_join(), bind_rows())
+
+    ```{r}
+    library(dplyr)
+
+    exam %>% 
+      summarise(mean_math = mean(math))
+
+    exam %>% 
+      mutate(m_math = mean(math))
+
+    exam %>% 
+      group_by(class) %>% 
+      summarise(mean_math = mean(math))
+
+    exam %>% 
+      group_by(class) %>% 
+      summarise(mean_math = mean(math),
+                sum_math = sum(math),
+                median_math = median(math),
+                n = n())
+
+    mpg %>% group_by(manufacturer, drv) %>% 
+      summarise(mean_cty = mean(cty)) %>% 
+      head(10)
+
+    library(ggplot2)
+    data(mpg)
+
+    mpg %>% 
+      group_by(manufacturer) %>% 
+      filter(class == "suv") %>% 
+      mutate(tot = (cty+hwy)/2) %>% 
+      summarise(mean_tot = mean(tot)) %>% 
+      arrange(desc(mean_tot)) %>% 
+      head(5)
+
+    mpg %>% 
+      group_by(class) %>% 
+      summarise(m_cty = mean(cty)) %>% 
+      arrange(desc(m_cty))
+
+    mpg %>% 
+      group_by(manufacturer) %>% 
+      summarise(m_hwy = mean(hwy)) %>% 
+      arrange(desc(m_hwy)) %>% 
+      head(3)
+
+    mpg %>% 
+      filter(class == "compact") %>% 
+      group_by(manufacturer) %>% 
+      summarise(n = n())
+
+
+    #merge => left_join
+    test1 <- data.frame(id = c(1,2,3,4,5),
+                        midterm = c(60, 70, 80, 90, 85)) 
+    test2 <- data.frame(id = c(1,2,3,4,5),
+                        final = c(70, 80, 65, 95, 80))
+    test1;test2
+
+    total <- left_join(test1, test2, by = "id"); total
+
+    name <- data.frame(class = c(1,2,3,4,5),
+                       teacher = c("kim", "lee", "park", "choi", "jung"))
+    name
+    exam
+
+    exam_new <- left_join(exam, name, by = "class")
+    exam_new
+
+
+    #stacking data vertically
+    group_a <- data.frame(id = c(1,2,3,4,5),
+                          test = c(60, 70, 80, 90, 85))
+    group_b <- data.frame(id = c(6, 7, 8, 9, 10),
+                          test = c(70, 80, 65, 95, 80))
+    group_a; group_b
+
+    group_all <- bind_rows(group_a, group_b)
+    group_all
+
+    fuel <- data.frame(fl = c("c","d","e","p","r"),
+                       price_fl = c(2.35, 2.38, 2.11, 2.76, 2.22))
+    fuel
+
+    mpg_fl <- left_join(mpg, fuel, by = "fl")
+    head(mpg_fl,3)
+
+    mpg_fl %>% 
+      select(model, fl, price_fl) %>%
+      group_by(model) %>% 
+      head(10)
+    ```
+
+<!-- -->
+
+-   18th Data pre-processing(arrange(), mutate())
+
+```{r}
+
+#ascending order
+
+exam %>% 
+  arrange(math)
+
+#descending order
+
+exam %>% 
+  arrange(desc(math))
+
+exam %>% 
+  arrange(class, math)
+
+mpg %>% 
+  filter(manufacturer == "audi") %>% 
+  arrange(desc(hwy)) %>% 
+           head(5)
+
+#mutate, derived variable
+exam %>% 
+  mutate(total = math + english + science) %>% 
+  head
+
+exam %>% 
+  mutate(total = math + english + science,
+         mean = (math + english + science)/3) %>% 
+           head(3)
+
+exam %>% 
+  mutate(test = ifelse(science >= 60, "pass", "fail")) %>% 
+  head
+
+exam %>% 
+  mutate(total = math + english + science,
+         mean = (total/3),
+         test = ifelse(mean > 90, "pass", "fail") )
+
+exam %>% 
+  mutate(total = math + english + science) %>% 
+  arrange(desc(total)) %>% 
+  head
+
+
+mpg_total <- mpg %>% 
+  mutate(total = cty + hwy,
+         mean = total/2) %>% 
+  arrange(desc(mean)) %>% 
+  head(3)
+
+mpg_total
+```
+
+-   17th Data pre-processing(filter(), select()
+
+```{r}
+library(dplyr)
+library(haven)
+library(readr)
+exam <- read_csv("C:/Users/user/OneDrive - University of Illinois - Urbana/R/R/Doit_R-master/Doit_R-master/Data/csv_exam.csv")
+
+head(exam, 6)
+
+exam %>% filter(class == 1)
+
+exam %>% filter(class == 2)
+
+exam %>% filter(class != 1)
+exam %>% filter(class != 3)
+
+exam %>% filter(math > 50)
+exam %>% filter(math < 50)
+exam %>% filter(english >= 80)
+exam %>% filter(english <= 80)
+
+exam %>% filter(class == 1 & 
+                  math >= 50)
+
+exam %>% filter(class == 2, english >= 80)
+
+
+#vertical bar, or 
+
+exam %>% filter(math >= 90 | english >= 90)
+
+exam %>%  filter(english < 90 | science < 50)
+
+exam %>%  filter(class == 1 | class == 3 | class == 5)
+
+#matching operator 
+exam %>% filter(class %in% c(1,3,5))
+
+class1 <- exam %>% 
+  filter(class == 1)
+
+class2 <- exam %>% 
+  filter(class == 2)
+
+mean(class1$math)
+mean(class2$math)
+
+library(ggplot2)
+data(mpg)
+
+names(mpg)
+
+dspl4 <- mpg %>%
+  filter(displ <= 4)
+
+dspl5 <- mpg %>% 
+  filter(displ >= 5)
+
+head(dspl4$hwy, 6)
+mean(dspl4$hwy)
+mean(dspl5$hwy)
+
+
+audi <- mpg %>% filter(
+  manufacturer == "audi"
+)
+
+toyota <- mpg %>% 
+  filter(manufacturer == "toyota")
+
+
+mean(audi$cty)
+mean(toyota$cty)
+
+cfh <- mpg %>% 
+  filter(manufacturer %in% c("chevolet", "ford", "hond"))
+mean(cfh$hwy)
+
+
+
+exam %>% select(math)
+exam %>% select(english)
+exam %>% select(class, math, english)
+
+exam %>% select(-math)
+exam %>% select(-math, -english)
+
+exam %>% 
+  filter(class == 1) %>% 
+  select(english)
+
+
+exam %>% 
+  select(id, math) %>% 
+  head
+
+exam %>% 
+  select(id, math) %>% 
+  head(10)
+
+data <- mpg %>% 
+  select(class, cty)
+  
+head(data)
+
+data_suv <- data %>% 
+  filter(class == "suv"); mean(data_suv$cty) 
+data_compact <- data %>% 
+  filter(class == "compact"); mean(data_compact$cty) 
+  
+
+```
+
+-   16th rename(), derived variable(conditional statements, nested conditional statements),
+
+```{r}
+df_raw <- data.frame(var1 = c(1,2,1),
+                     var2 = c(2,3,2))
+df_raw
+
+
+library(dplyr)
+
+df_new <- df_raw
+df_new
+
+df_new <- rename(df_new, v2 = var2)
+df_new
+
+df_new <- rename(df_new, v1 = var1)
+df_new
+
+library(ggplot2)
+data(mpg)
+
+A <- mpg
+head(A)
+
+A <- rename(A, city = cty, 
+            highway = hwy)
+
+names(A)
+```
+
+Derived variable
+
+```{r}
+
+df <- data.frame(var1 = c(4,3,8),
+                 var2 = c(2, 6,1))
+df
+
+df$var_sum <- df$var1 + df$var2; df
+
+df$var_mean <- df$var_sum/2
+df
+
+mpg$total <- (mpg$cty + mpg$hwy)/2
+head(mpg)
+
+mean(mpg$total)
+
+
+```
+
+conditional functions
+
+```{r}
+summary(mpg$total)
+hist(mpg$total)
+boxplot(mpg$total)
+
+mpg$test <- ifelse(mpg$total > 20, "pass", "fail")
+
+head(mpg, 20)
+table(mpg$test)
+qplot(mpg$test)
+
+#Nested conditional statements 
+# A >= 30, B 20~29, C < 20 
+
+mpg$grade <- ifelse(mpg$total >= 30, "A",
+                    ifelse(mpg$total <30 & mpg$total >=20, "B", "C"))
+
+head(mpg$grade, 10)
+table(mpg$grade)
+qplot(mpg$grade)
+
+mpg$grade2 <- ifelse(mpg$total >= 30, "A", 
+                     ifelse(mpg$total >=25, "B",
+                            ifelse(mpg$total >20, "C", "D")))
+table(mpg$grade2)
+
+
+```
+
+## First Week (Sep. 9 \~ Sep. 13)
+
+Basic R
+
+Sep. 12
+
+```{r}
+library(readr)
+
+exam <- read_csv("C:/Users/user/OneDrive - University of Illinois - Urbana/R/R/Doit_R-master/Doit_R-master/Data/csv_exam.csv") 
+
+head(exam)  
+
+head(exam, 10)
+
+tail(exam)
+
+tail(exam, 10)
+
+View(exam)
+
+dim(exam) #dimension
+
+str(exam) #structure
+
+summary(exam)
+
+library(ggplot2)
+
+data(mpg)
+head(mpg)
+tail(mpg)
+View(mpg)
+dim(mpg)
+str(mpg)
+summary(mpg)
+```
+
+Sep.9: Creating Dataframe
+
+```{r}
+english <- c(90, 80, 60, 70) #creat variable
+english
+
+math <- c(50, 60, 100, 20)
+math
+```
+
+```{r}
+df_midterm <- data.frame(english, math)
+
+df_midterm
+```
+
+```{r}
+class <- c(1,1,2,2)
+class
+
+df_midterm <- data.frame(english, math, class)
+```
+
+```{r}
+mean(df_midterm$english)
+mean(df_midterm$math)
+```
+
+```{r}
+df_midterm <- data.frame(english = c(90, 80, 60, 70),
+                         math = c(50, 60, 100, 20),
+                         class = c(1,1,2,2))
+df_midterm
+```
+
+```{r}
+df_fruits <- data.frame(fruits = c("apple", "strawberry", "watermelon"),
+                        price = c(1, 4, 7),
+                        sales = c(24, 38, 13))
+df_fruits
+
+mean(df_fruits$price)
+mean(df_fruits$sales)
+
+mean(df_fruits$price * df_fruits$sales)
+```
