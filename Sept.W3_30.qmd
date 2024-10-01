@@ -1,59 +1,8 @@
 ---
-title: "Sept.W3_27th"
+title: "Sept.W3_30th"
 format: html
 editor: visual
 ---
-
-## W3_27th
-
-```{r}
-
-library(here)
-
-rm(list=ls())
-
-raw_moon <- readLines(here("data", "speech_moon.txt"), encoding = "UTF-8")
-head(raw_moon)
-
-#str_repalce_all, remove unnecessary words
-
-txt <- "치킨은!! 맛있따. xyz 정말 맛있따!@#"
-txt
-
-install.packages("stringr")
-library(stringr)
-str_replace_all(string = txt, pattern = "[가-힣]", replacement = " ")
-
-moon <- raw_moon %>% 
-  str_replace("[^가-힣]", " ")
-head(moon)
-
-?str_replace_all
-
-txt <- "치킨은   맛있다   정말 맛있다"
-txt
-str_squish(txt)
-
-moon <- moon %>% 
-  str_squish()
-head(moon)
-
-# change characgteristic vetor into tibble  
-
-library(dplyr)
-
-moon <- as_tibble(moon)
-moon
-
-moon <- raw_moon %>% 
-  str_replace_all("[^가-힣]", " ") %>% 
-  str_squish() %>% 
-  as_tibble()
-
-#tibble vs. data frame
-iris
-as_tibble(iris)
-```
 
 ## Sept. 30th
 
