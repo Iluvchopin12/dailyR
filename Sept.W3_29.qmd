@@ -1,0 +1,160 @@
+---
+title: "Sept.W3_27th"
+format: html
+editor: visual
+---
+
+## W3_27th
+
+```{r}
+
+library(here)
+
+rm(list=ls())
+
+raw_moon <- readLines(here("data", "speech_moon.txt"), encoding = "UTF-8")
+head(raw_moon)
+
+#str_repalce_all, remove unnecessary words
+
+txt <- "치킨은!! 맛있따. xyz 정말 맛있따!@#"
+txt
+
+install.packages("stringr")
+library(stringr)
+str_replace_all(string = txt, pattern = "[가-힣]", replacement = " ")
+
+moon <- raw_moon %>% 
+  str_replace("[^가-힣]", " ")
+head(moon)
+
+?str_replace_all
+
+txt <- "치킨은   맛있다   정말 맛있다"
+txt
+str_squish(txt)
+
+moon <- moon %>% 
+  str_squish()
+head(moon)
+
+# change characgteristic vetor into tibble  
+
+library(dplyr)
+
+moon <- as_tibble(moon)
+moon
+
+moon <- raw_moon %>% 
+  str_replace_all("[^가-힣]", " ") %>% 
+  str_squish() %>% 
+  as_tibble()
+
+#tibble vs. data frame
+iris
+as_tibble(iris)
+```
+
+## Sept. 30th
+
+-   Unnest_tokens\_\_tidytext
+-   Word frequency analysis_count()
+
+```{r}
+text <- tibble(value = "The republic of korea is a democratic republic. The sovereignty of the republic of korea resides in the people, and all authority comes from the people.")
+text
+
+require("tidytext")
+text %>% 
+  unnest_tokens(input = value, #text to be tokend
+                output = word, #input name of variable
+                token = "sentences") # by sentence
+
+text %>% 
+  unnest_tokens(input = value, #text to be tokend
+                output = word, #input name of variable
+                token = "words") # by space
+
+text %>% 
+  unnest_tokens(input = value,
+                output = word,
+                token = "characters")
+
+word_space <- moon %>% 
+  unnest_tokens(input = value,
+                output = word,
+                token = "words")
+word_space
+
+
+word_space <- word_space %>% 
+  count(word, sort = T)
+word_space
+
+#remove one-letter words _ stringr -- str_count()
+str_count("배")
+str_count("사과")
+
+# leave at least two charaters
+
+word_space <- word_space %>% 
+  filter(str_count(word) > 1)
+
+word_space
+
+# code all at once
+
+word_space <- moon %>% 
+  unnest_tokens(input = value,
+                output = word,
+                token = "words")
+
+word_space <- word_space %>% 
+  count(word, sort = T) %>% 
+  filter(str_count(word) > 1)
+
+word_space
+
+# Extracting high grequency words
+
+top20 <- word_space %>% 
+  head(20)
+
+top20
+
+library(ggplot2)
+ggplot(top20, aes(x = reorder(word, n), y = n)) +
+  geom_col() +
+coord_flip()
+
+#trimming graph
+ggplot(top20, aes(x = reorder(word, n), y =n)) +
+  geom_col() +
+  coord_flip () +
+  geom_text(aes(label = n), hjust = -0.3) +
+  labs(title = "Word frequency of Moon Jae-in's candidacy speech", 
+       x = NULL, y = NULL) + #delet axix name
+  theme(title = element_text(size = 12)) #title size
+
+#making word cloud _ geom_text_wordcloud()
+require("ggwordcloud")
+
+ggplot(word_space, aes(label = word, siz = n)) +
+  geom_text_wordcloud(seed = 1234) + 
+  scale_radius(limits = c(3, NA), #frequency word size
+               range = c(3, 30)) #size of words
+
+
+#trimming grpah_scale_color_gradient()
+ggplot(word_space,
+       aes(label = word,
+           size = n,
+           col = n)) +
+  geom_text_wordcloud(seed = 1234) + 
+  scale_radius(limits = c(3, NA),
+               range = c(3, 30)) +
+  scale_color_gradient(low = "#66aaf2",
+                       high = "#004EA1") +
+  theme_minimal()
+
+```
