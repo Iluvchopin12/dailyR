@@ -1,0 +1,79 @@
+---
+title: "Daily_R_Oct.11"
+format: html
+editor: visual
+---
+
+## Oct. 11th
+
+-   comparative analysis
+
+    -   comparing word frequency
+
+        -   merge text
+
+        -   find word frequency by population
+
+        -   extract frequently used word (slice_max)
+
+        -   create a bar graph
+
+```{r}
+rm(list=ls())
+library(dplyr)
+library(here)
+
+#load data
+raw_moon <- readLines(here("Data", "speech_moon.txt"), encoding = "UTF-8")
+
+moon <- raw_moon %>% 
+  as_tibble() %>% 
+  mutate(president = "moon")
+
+raw_park <- readLines(here("Data", "speech_park.txt"), encoding = "UTF-8")
+park <- raw_park %>% 
+  as_tibble() %>% 
+  mutate(president = "park")
+
+moon
+park
+
+#merge data
+## bind_rows(), select()
+
+bind_speeches <- bind_rows(moon, park) %>% 
+  select(president, value)
+
+head(bind_speeches)
+tail(bind_speeches)
+
+#find word frequency by population
+##remove non-Korean characters and consecutive spaces and use a morphological analyser to root in to a noun.
+
+library(stringr)
+speeches <- bind_speeches %>% 
+  mutate(value = str_replace_all(value, "[^가-힣]", " "),
+         value = str_squish(value))
+speeches
+
+#tokenization
+library(tidytext)
+library(KoNLP)
+
+
+#jdk 설치하기
+install.packages("multilinguer")
+multilinguer::install_jdk() #multilinguer::install_jdk() 을 실행하면 R 새션을 재시작됨
+
+
+#의존성 패키지 설치
+install.packages(c("hash", "tau", "Sejong", "RSQLite", "devtools", "bit", "rex", "lazyeval", "htmlwidgets", "crosstalk", "promises", "later", "sessioninfo", "xopen", "bit64", "blob", "DBI", "memoise", "plogr", "covr", "DT", "rcmdcheck", "rversions"), type = "binary")
+
+#Github 버전 설치
+install.packages("remotes")
+
+#KoNLP 설치방법1
+remotes::install_github('haven-jeon/KoNLP', upgrade = "never", INSTALL_opts=c("--no-multiarch"))
+
+library(KoNLP)
+```
