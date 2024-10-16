@@ -1,0 +1,93 @@
+---
+title: "Daily R"
+format: html
+editor: visual
+---
+
+## Oct.14th
+
+### Ch.1 Intro
+
+```{r}
+library(faraway)
+data(gavote)
+help(gavote)
+help.search("quantiles")
+gavote
+
+summary(gavote)
+
+gavote$undercount <- (gavote$ballots-gavote$votes) / gavote$ballots
+summary(gavote$undercount)
+
+sum(gavote$ballots-gavote$votes)/sum(gavote$ballots)
+
+hist(gavote$undercount, main="undercount", xlab="percent Undercount")
+#a histogram is a fairly crude estimate of the density of the variable that is sensitive to the choice of bins.
+
+
+plot(density(gavote$undercount), main="Undercount")
+rug(gavote$undercount)
+
+
+pie(table(gavote$equip), col = gray(0:4/4))
+
+#omit the col argument, you will see a color plot by default.
+pie(table(gavote$equip))
+
+
+barplot(sort(table(gavote$equip), decreasing=TRUE, las=2))
+#the las =2 argument means that the bar label are printed vertically as opposed to horizontally.
+
+barplot(sort(table(gavote$equip), decreasing=TRUE, las =0))
+
+
+
+gavote$pergore <- gavote$gore/gavote$votes
+plot(pergore ~ perAA, gavote, xlab = "Proportion African American",
+     ylab = "proportion for Gore")
+
+#pergore ~ perAA specifies that pergore is the dv and perAA is the iv
+
+
+# Side-by-side boxplots are a good way to visually compare a quantitative variable across different levels of a qualitative variable.
+plot(undercount ~ equip, gavote, xlab="equip", las=1)
+
+##shows no major differences in undercount for the different types of equipment.
+
+xtabs(~atlanta + rural, gavote)
+## the ~ symbol is used to indicate the relationship between variables
+```
+
+## Oct.15th
+
+```{r}
+nix <- c(3,10,11,12)
+cor(gavote[, nix])
+
+lmod <- lm(undercount ~ pergore + perAA, gavote)
+coef(lmod)
+predict(lmod)
+
+#how well the model fits the data 
+#the residual sum of squres (RSS) 
+deviance(lmod)
+
+#the degrees of freedom
+df.residual(lmod)
+nrow(gavote)-length(coef(lmod))
+
+
+#the residual standard error 
+sqrt(deviance(lmod)/df.residual(lmod))
+
+summary(lmod)
+lmodsum <- summary(lmod)
+
+lmodsum$sigma
+
+lmodsum$r.squared
+cor(predict(lmod), gavote$undercount)^2
+
+lmodsum$adj.r.squared
+```
