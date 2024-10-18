@@ -1,0 +1,16 @@
+# The key to ch.1 is to understand how causality estimated from data from experimental designs with RCT from causality estimated from data from observation studies where RCT is not guarnteed.
+
+```{r}
+
+library(tidyverse)
+library(here)
+library(readr)
+mydata <- read_csv("C:/Users/user/OneDrive - University of Illinois - Urbana/R/dailyR/RCM/simdata.csv")
+
+names(mydata)
+logis_ps = glm(treat ~ V1+V2+V3, data=mydata,
+               family=binomial(link = "logit"))
+
+summary(logis_ps)
+```
+
