@@ -1,0 +1,36 @@
+\*\* As of today, I am going to go through the book titled 'Causal inference based on Rubin's Causal model Using propensity Score Analysis in R'.\*\*
+
+# Oct. 18th
+
+# Overview of Propensity Score Analysis
+
+#### The key to ch.1 is to understand how causality estimated from data from experimental designs with RCT from causality estimated from data from observation studies where RCT is not guaranteed.
+
+## 1. Research Design and Causal Inference
+
+-   we categorize research applying causal inference based on the 'research design' where data is generated, into experimental studies following an experimental design and observation studies not following an experimental design.
+
+-   Potential issues that can arise when conducting causal inference in observational studies using conventional data analysis methods, such as the t-test or generalized linear models(GLM), which consider the difference in expected values between treated and untreated levels of the causal variable as the treatment effect.
+
+-   the potential outcomes framework, a theoretical explanation system for the propensity score analysis techniques, which offers a more valid method of causal inference in observational study settings.
+
+-   it is generally accepted that, apart from studies undergoing a randomized controlled trial (RCT) that includes a control group, it is not possible to deem the relationship between a causal variable and an outcome variable as a valid causal relationship.
+
+-   Propensity score analysis (PSA) techniques apply the assumption that in cases where RCTs are difficult or impossible, observational study data can be statistically modeled to estimate scenarios similar to or approximating RCTs. These techniques estimate the effect of a causal variable on an outcome variable, namely the treatment effect.
+
+-   RCT research and observational studies are distinguished based on the presence of random assignment. RCTs control for self-selection bias through random assignment, while observational studies are not free from the risk of self selection bias due to the absence of random assignment.
+
+-   In propensity score analysis of data collected in observational study settings, 'the propensity score, which signifies the probability of an individual being assigned to the treatment group, is estimated using confounders. This score is then modeled to create conditions that are equivalent to, or very similar to, random assignment.'
+
+### Rubin's causal Inference Model (RCM)
+
+-   Counter-factual, potential outcomes\
+    in causal modeling, factual refers to the 'realized potential outcomes', and 'counter-factual' refers to the 'unrealized potential outcomes'
+
+-   From the RCM perspective, realized potential variables are observed values, whereas unrealized counterfactuals become missing values (Rubin, 1987; Williamson et al., 2012).
+
+## 2. Estimation of Propensity Score
+
+## 3. R package for practicing Propensity Score Analysis Techniques
+
+## 
