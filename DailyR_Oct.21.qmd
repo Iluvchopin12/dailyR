@@ -1,0 +1,29 @@
+
+```{r}
+f <- function(x) x^2+2*x+3
+f(3)
+plot(f, -5,5)
+
+round(pi*2.5^2, 5)
+
+f1 <- function(x) x^2-1
+plot(f1, -2,2)
+
+
+c("lmtest", "sandwich", "car", "lionking") %in% installed.packages()
+install.packages("Ecdat")
+install.packages("AER")
+install.packages("lmtest")
+install.packages("car")
+install.packages("sandwich")
+library(Ecdat)
+library(AER)
+library(lmtest)
+library(car)
+library(sandwich)
+
+
+```
+
+
+
