@@ -1,0 +1,591 @@
+---
+title: "Exploration 6: Matching beyond two treatments/interventions"
+author: 'Jake Bowers'
+date: '`r format(Sys.Date(), "%B %d, %Y")`'
+format:
+  html:
+    code-fold: true
+  pdf:
+    number-sections: true
+    colorlinks: true
+    cite-method: biblatex
+    keep-tex: true
+    monofontoptions: "Scale=0.7"
+    include-in-header:
+      text: |
+        \usepackage{bm}
+        \usepackage{tikz}
+        \usepackage{tikz-cd}
+        \usetikzlibrary{arrows,automata,positioning,trees,decorations.markings}
+        \usepackage{tikz-qtree}
+        \usepackage{amsmath, booktabs, caption, longtable,listings,fancyvrb,fvextra}
+        \DeclareOldFontCommand{\bf}{\normalfont\bfseries}{\mathbf}
+fontsize: 10pt
+geometry: margin=1in
+graphics: yes
+bibliography: classbib.bib
+biblio-style: "authoryear-comp,natbib"
+---
+
+\input{mytexsymbols}
+
+```{r setup, echo=FALSE, results=FALSE, include=FALSE, cache=FALSE}
+library(here)
+source(here("qmd_setup.R"))
+library(tidyverse)
+library(estimatr)
+library(DeclareDesign)
+library(MASS)
+library(RItools)
+library(optmatch)
+library(robustbase)
+library(designmatch)
+
+# library(gurobi) ## this makes designmatch much faster
+load(url("http://jakebowers.org/Data/meddat.rda"))
+meddat <- mutate(meddat,
+  HomRate03 = (HomCount2003 / Pop2003) * 1000,
+  HomRate08 = (HomCount2008 / Pop2008) * 1000
+)
+```
+
+Imagine that there is a debate about whether housing insecurity is more strongly
+related to violence than unemployment. We have neighborhoods in Medellin where
+we have measured both violence scaled by the population of the place
+(`HomRate08`), whether people own their own home (`nhOwn`), and the proportion
+of people who are employed (`nhEmp`).  However, we know that both housing
+insecurity and employment as well as violence can be predicted from other
+background variables: maybe the relationships we would summarize between housing and
+violence and between employment and violence would be confounded by those other
+relationships.
+
+As a reminder about what we know about the data:
+
+
+\scriptsize
+```{r eval=FALSE}
+## The Intervention
+nhTrt        Intervention neighborhood (0=no Metrocable station, 1=Metrocable station)
+
+## Some Covariates (there are others, see the paper itself)
+nh03         Neighborhood id
+nhGroup      Treatment (T) or Control (C)
+nhTrt        Treatment (1) or Control (0)
+nhHom        Mean homicide rate per 100,000 population in 2003
+nhDistCenter Distance to city center (km)
+nhLogHom     Log Homicide (i.e. log(nhHom))
+
+## Outcomes (BE03,CE03,PV03,QP03,TP03 are baseline versions)
+BE      Neighborhood amenities Score 2008
+CE      Collective Efficacy Score 2008
+PV      Perceived Violence Score 2008
+QP      Trust in local agencies Score 2008
+TP      Reliance on police Score 2008
+hom     Homicide rate per 100,000 population Score 2008-2003 (in log odds)
+
+HomCount2003 Number of homicides in 2003
+Pop2003      Population in 2003
+HomCount2008 Number of homicides in 2008
+Pop2008      Population in 2008
+```
+
+1. Please summarize those two relationships without any adjustment. 
+Please interpret what you found. Does one relationship appear larger than the other?
+
+```{r}
+lm1 <- lm(HomRate08 ~ nhOwn, data = meddat)
+lm2 <- lm(HomRate08 ~ nhEmp, data = meddat)
+lm3 <- lm(HomRate08 ~ nhOwn + nhEmp, data = meddat)
+
+coefficients(lm1); coefficients(lm2); coefficients(lm3)
+
+```
+> Answer
+  Based on lim1 to lim3, we can infer that without adjustments, an increase in homeownership is associated with a decrease in violence, while higher employment rates are associated with an increase in violence. Comparing these two relationships, we can see that the effect of employment rates on violence levels is much greater and stronger than that of homeownership `r coefficients(lm3)` . In other words, when unadjusted, the impact of employment rates is significantly larger than that of homeownership.
+
+
+2. Now here is an approach to adjustment that has many moving parts (like the
+   bipartite matching approach but is called **non-bipartite** matching) but which doesn't require two groups. Rather it
+   creates pairs of units (neighborhoods) in this case, which are as similar as
+   possible in regards to many covariates.
+
+```{r}
+covs <- c("nhClass", "nhSisben","nhPopD",  "nhQP03",  "nhPV03",  "nhTP03",
+    "nhBI03",  "nhCE03",  "nhNB03" , "nhMale",  "nhAgeYoung",
+    "nhAgeMid","nhMarDom","nhSepDiv","nhAboveHS" , "nhHS", "HomRate03")
+
+covmat <- dplyr::select(meddat,one_of(covs))
+
+## Mahalanobis distances for each neighborhood
+meddat$covmh <- mahalanobis(
+  x = covmat ,
+  center = col_means(covmat),
+  cov = cov(covmat)
+)
+
+## Absolute mahalanobis distances between neighborhoods
+mhdist_mat <- outer(meddat$covmh, meddat$covmh, FUN = function(x, y){ abs(x - y) })
+
+```
+
+>Answer
+  Hello! It's quite reflective to think that I'm now explaining non-bipartite matching to you, considering I started with not knowing about RCTs. Following the method I've used before, let's start with the code explanation. This code is designed to calculate the Mahalanobis distance between regions based on covariates, aiming to assess the similarity between them. What makes this approach interesting is that, unlike previous methods that only compared two groups, it aims to create pairs with similar characteristics through matching between individual regions. As we discussed last week, unlike Euclidean distance, the Mahalanobis distance measures distances in multidimensional space, allowing for matching that considers correlations between covariates. Therefore, even in the absence of two distinct groups, it's possible to use 'non-bipartite matching' techniques to pair regions with similar characteristics.
+  This approach highlights the advanced capabilities of statistical matching in research, offering a sophisticated tool to identify comparable entities beyond traditional binary groupings, thus facilitating more nuanced analyses in studies that require detailed, pair-wise comparison of units based on multiple characteristics.
+
+
+Now, we can match on those distances:
+
+
+```{r}
+## Turns out that the design match software doesn't like too many decimals, and prefers
+## mean-centered distances. This doesn't really matter in substantive terms but is important in
+## regards to getting the software to work
+matchdist_mat <- round(mhdist_mat / mean(mhdist_mat), 2)
+
+## Don't allow any pairs that differ by more than 2 on HomRate03
+nearlist <- list(covs=as.matrix(meddat$HomRate03),pairs=c(HomRate03=2))
+
+## For larger problems you will want to install gurobi using an academic
+## license. After installing the license, then I do something like the following
+## where the details of the version numbers will differ
+
+install.packages("/Library/gurobi911/mac64/R/gurobi_9.1-1_R_4.0.2.tgz", repos = NULL, type = "binary")
+library(gurobi)
+
+solverlist <- list(name = "highs", approximate = 1, t_max = 1000, trace = 1)
+
+mh_pairs <- nmatch(
+  dist_mat = matchdist_mat,
+  near = nearlist,
+  subset_weight = 1,
+  solver = solverlist
+)
+## look at raw mh_pairs output.
+## mh_pairs
+## Looks like neighborhood 6 is matched with neighborhood 1, etc..
+
+#' Function to convert the output of nmatch into a factor variable for use in analysis
+  nmatch_to_df <- function(obj, origid) {
+## We want a factor that we can merge onto our
+## existing dataset. Here returning a data.frame so that
+## we can merge --- seems less error prone than using
+## rownames even if it is slower.
+    matchesdat <- data.frame(
+        bm = obj$group_id,
+        match_id = c(obj$id_1, obj$id_2)
+        )
+      matchesdat$id <- origid[matchesdat$match_id]
+      return(matchesdat)
+  }
+
+
+mh_pairs_df <- nmatch_to_df(mh_pairs,origid=meddat$nh)
+nrow(mh_pairs_df)
+
+## So, in matched set 1 (bm==1) we see two neighborhoods:
+mh_pairs_df %>% filter(bm==1)
+mh_pairs_df$nh <- mh_pairs_df$id
+
+# The nmatch_to_df function creates a column labeled "bm" which contains
+meddat2 <- inner_join(meddat, mh_pairs_df, by = "nh")
+meddat2 <- droplevels(meddat2)
+stopifnot(nrow(meddat2) == nrow(mh_pairs_df))
+
+## Number of matches:
+# meddat2$bm is the matched set indicator.
+stopifnot(length(unique(meddat2$bm)) == nrow(meddat2) / 2)
+nrow(mh_pairs_df)
+nrow(meddat2)
+## Notice some observations were not matched (we only have 28 neighborhoods in meddat2 after the matching)
+nrow(meddat)
+```
+
+> Answer
+  This code is quite intriguing, so it’s worth going through step by step. First, 'matchdist_mat <- round(mhdist_mat / mean(mhdist_mat), 2)' rounds the Mahalanobis distance matrix divided by its mean to two decimal places. This is done for mean-centering purposes. While this doesn't actually change the distances, it helps the matching algorithm operate more smoothly. The next line, which assigns to the 'nearlist' object, ensures that covariates between matched pairs do not differ by more than 2. Then, the 'nmatch' function performs matching and returns it in a data frame format. After that, the matched pairs are combined with the original dataset 'meddat,' and unused factors are removed using the 'droplevels' function.
+
+Can you make a matched design that drops fewer observations? Or a matched design that drops more?
+
+Now, what we are trying to do is break the relationship between covariates and
+the main explanatory variables (just as we might in a pair randomized study):
+the neighborhood higher on the explanatory variable shouldn't be systematically more
+or less likely to be the neighborhood higher on any given covariate in such a study.
+We assess this below:
+
+```{r}
+## Make a new variable that is 1 for the neighborhood higher in home ownership
+## and 0 for the neighborhood who is lower. (Similarly for Employment)
+## We'd like to show that the covariates are not related to either home
+## ownership or employment within pair.
+meddat2 <- meddat2 %>%
+  group_by(bm) %>%
+  mutate(rank_own = rank(nhOwn) - 1,
+      rank_emp = rank(nhEmp) - 1) %>%
+  arrange(bm) %>%
+  ungroup()
+
+head(meddat2)
+
+## Notice that in pair bm=1, the neighborhood with .727 ownership is ranked 1 and the neighborhood with ownership .562 is ranked 0.
+meddat2 %>% dplyr::select(bm,nh, nhOwn,rank_own,nhEmp, rank_emp)
+
+
+## Notice we have two sets with a tie:
+table(meddat2$rank_own)
+
+## Since balanceTest demands binary treatment, we remove them for now.
+
+meddat3 <- meddat2 %>% filter(rank_own!=.5)
+table(meddat3$rank_own)
+
+## We are trying to break the relationships between the covariates and the two
+## explanatories. Let's look at one of them here.
+
+## Since we have a smaller dataset, we need to use fewer covariates if we want to use the large sample approximation from balanceTest
+newcovs <- c("nhClass","HomRate03","nhTP03","nhAgeYoung","nhAboveHS")
+
+balfmla <- reformulate(newcovs, response = "rank_own")
+## Using only the matched data and also conditional within sets
+xb_own <- balanceTest(update(balfmla,.~.+strata(bm)), data = meddat3)
+xb_own$overall
+xb_own_vars <- data.frame(xb_own$results[, c("Control", "Treatment", "adj.diff", "std.diff", "p"), "bm"])
+## xb_own_vars$padj <- p.adjust(xb_own_vars$p, method = "holm") ## already adjusted using holm adjustment by default in balanceTest
+options(digits = 3)
+arrange(xb_own_vars, p) %>% zapsmall(digits = 5)
+stopifnot(xb_own$overall[, "p.value"] > .3)
+```
+
+> Answer
+  As explained above, this code aims to reduce the influence of covariates on the dependent variable, similar to what we did in the RCT. Specifically, the code ranks groups based on the homeownership variable. Since the 'rank' function starts from 1 by default, subtracting 1 allows it to start from 0. As a result, if 'rank_own' is 0, it indicates an area with low homeownership, and if it is 1, it indicates high homeownership. Similarly, 'rank_emp' represents the rank for employment levels. Following this, variables that are tied in the ranking are removed from the 'rank' function. While one might consider that tied ranks represent similar covariates and thus could be used, the 'balancetest' function only allows binary treatments, which could complicate the analysis if tied values of 0.5 are included. Next, to eliminate the relationship between the explanatory variable and the covariate, the association between the covariate and the homeownership rank ('rank_own') is examined. Using the balance test, we then check whether covariates in the matched pairs (bm) are independent of the homeownership rank. Since 'xb_own$overall' is a categorical variable, a chi-square test is conducted, and the higher the p-value, the more we can infer that the relationship between the covariate and the homeownership rank is not significant. In the actual values, the matched group (bm) shows 0.966, while all paired data show 0.980, suggesting that covariate balance is well maintained.
+
+```{r}
+## An equivalent way to do what balanceTest is doing
+library(formula.tools)
+library(coin)
+coin_fmla <- ~ rank_own | bmF
+lhs(coin_fmla) <- rhs(balfmla)
+meddat3$bmF <- factor(meddat3$bm)
+coin_test <- independence_test(coin_fmla,data=meddat3,teststat="quadratic")
+coin_test_perm <- independence_test(coin_fmla,data=meddat3,teststat="quadratic",distribution=approximate(nresample=1000))
+
+coin_test; coin_test_perm
+```
+
+Please interpret the above assessment of the pairing. What does it mean in
+regards the relationships between the covariates that we assessed and the key
+explanatory variable (`nhOwn`) after pairing? What about the relationships
+between `nhEmp` and the covariates? If we calculated differences within pairs
+first and then averaged them, would we be justified in staying that we have
+removed confounding caused by the observed covariates used in the those balance
+assessments? Why?
+
+>Answer
+  This code performs an independence test using the 'coin' package. Personally, I like the use of permutation testing, as it involves comparing randomly arranged variables to examine the relationship between two variables, which I find intriguing. In any case, the code evaluates whether covariates are independent of the main explanatory variable ('rank_own') within the matched pairs. When looking at the results, the p-value was 1 for both tests. This indicates that there is no statistically significant relationship between the covariates and the main explanatory variable. Therefore, the matching was successful, suggesting that confounding variables from covariates have been effectively removed 
+
+
+Now, assuming we are happy with the design, we move onto assessing the
+relationships between home ownership and violence in 2008 at the neighborhood
+level.
+
+```{r}
+## Ways to assess the relationship between home ownership and the outcome
+## conditional on sets. These are all the same.
+
+## We will start with estimating the difference between the high and low home
+## ownership neighborhoods and then move to estimating the smooth linear
+## relationship between differences in proportion home ownership and the
+## outcome.
+
+## First, the most transparent way, but most typing.
+meddat2$bmF <- factor(meddat2$bm)
+pair_diffs <- meddat2 %>% filter(rank_own!=.5) %>%
+    group_by(bmF) %>%
+    summarize(hr=mean(HomRate08),
+    hr_diff=HomRate08[rank_own==1] - HomRate08[rank_own==0],
+    own_diff=nhOwn[rank_own==1] - nhOwn[rank_own==0],
+    own_diff_raw=diff(nhOwn),
+    hr_diff_raw=diff(HomRate08),.groups="drop")
+
+## Simply the mean of the differences within pair between the higher and lower
+## home ownership neighborhoods. We will see that this is exactly the same as
+## the other estimates.
+est1 <- mean(pair_diffs$hr_diff)
+est1
+
+est2 <- difference_in_means(HomRate08~rank_own,blocks=bm,data=meddat2,subset=rank_own!=.5)
+est3 <- lm_robust(HomRate08~rank_own,fixed_effects=~bm,data=meddat2,subset=rank_own!=.5)
+est4 <- lm_robust(HomRate08~rank_own+bmF,data=meddat2,subset=rank_own!=.5)
+## This next estimate is often called the group-mean centered or mean-deviated version
+## it is what is happening the background of the fixed_effects approach
+meddat2 <- meddat2 %>% group_by(bmF) %>%
+    mutate(hr_md = ifelse(rank_own!=.5,HomRate08- mean(HomRate08),NA),
+        rank_own_md = ifelse(rank_own!=.5,rank_own - mean(rank_own),NA))
+est5 <- lm_robust(hr_md~rank_own_md,data=meddat2)
+summary(est5)
+
+rbind(est1=est1,
+    est2=coef(est2),
+    est3=coef(est3),
+    est4=coef(est4)[["rank_own"]],
+    est5=coef(est5)[["rank_own_md"]])
+
+all.equal(est1,coef(est4)[["rank_own"]])
+all.equal(est1,coef(est2)[["rank_own"]])
+all.equal(est1,coef(est3)[["rank_own"]])
+all.equal(est1,coef(est5)[["rank_own_md"]])
+```
+
+>Answer 
+  This code evaluates the relationship between homeownership and violence within matched pairs. First, it calculates the differences in violence levels ('hr_diff') and homeownership ('own_diff') between areas with high and low homeownership. 'est1' calculates the average difference in violence levels within matched pairs. 'est2' uses the 'difference_in_means()' function. There is no difference in the results between 'est1' and 'est2'; the difference lies in the calculation approach. 'est3' controls for covariates using fixed effects. A potential question might be why fixed effects are used even though covariate influence was controlled through matching. The reason is that using fixed effects helps control for confounding variables that may not have been fully addressed through matching. In other words, while matching controls for covariates prior to the analysis, the fixed-effect model further controls for confounding variables based on the matched data. 'est4' is a linear model that includes fixed effects. 'est5' employs group mean centering, where data is centered at the block-level mean before performing regression analysis.
+
+
+What did you learn about how to calculate the effect of home ownership on
+violence using this pair-matched design from the above code chunk?
+In `est5` the intercept is 0 `r coef(est5)["(Intercept)"]` and the intercept is
+not reported in the other approaches except for `est4`.`r coef(est4)["(Intercept)"]`
+What does this mean? Recall that the intercept is the value of the outcome when the explanatory variable is 0. 
+In this case, when is `rank_own_md` 0? Well, it is never truly zero. Rank_own_md=.5 when
+rank_own=1 and rank_own_md=-.5 when rank_own=0. In fact, the average value of
+rank_own_md across the whole dataset is 0. By subtracting off the mean outcome
+within each set, we also ensured that the overall mean of the outcome is 0. We
+know that the least squares line must go through the point of means (mean of x
+and mean of y). And here the mean of both x and y is 0 (by construction). So,
+the intercept is the value of the outcome when the explanatory variable is 0
+(and since value of the outcome when the explanatory variable is at its mean is
+the mean of the outcome, both are 0). So, do we care about this intercept in
+this case? No. We **created** the situation where the intercept is 0. We know
+it is 0. So we don't really care to interpret it further.
+
+> Answer
+  All estimates were found to be -0.134, indicating that areas with higher homeownership have, on average, violence levels that are lower by -0.134 compared to areas with lower homeownership. In other words, we can infer that higher homeownership tends to reduce violence. As you mentioned, since we created the centered data, both the independent variable ('rank_own_md') and the dependent variable ('hr_md') have a mean of 0. Therefore, it is natural for the intercept of the regression line to be 0.
+
+```{r}
+## More information about the mean-deviated approach to adjusting for pairs
+meddat2 %>% dplyr::select(bmF,nhOwn,rank_own, rank_own_md, HomRate08, hr_md ) %>% head()
+meddat2 %>% 
+  ungroup() %>% 
+  filter(rank_own!=.5) %>% 
+  summarize(mean(rank_own_md),mean(hr_md))
+
+
+```
+
+What about est4? What does the intercept mean?
+
+
+```{r}
+## Notice exactly the same as the mean outcome within each pair
+group_means <- lm_robust(HomRate08~bmF,data=meddat2,subset=rank_own!=.5)
+coef(group_means)
+rbind(pair_diffs$hr,
+c(coef(group_means)[1],coef(group_means)[1]+coef(group_means)[2:length(coef(group_means))]))
+
+## What about this?
+coef(est4)
+
+## Notice that all of the coefficients are the same.
+coef(est4)[3:length(coef(est4))]
+coef(group_means)[2:length(coef(group_means))]
+
+## So what is happening with the intercept?
+## Maybe this will help us understand:
+## Create yhat for rank_own==1, 0, and .5 (even though rank_own==.5 is
+## excluded), it turns out that the mean of rank_own is .5
+mean(filter(meddat2,rank_own!=.5)$rank_own)
+pred_est4 <- predict(est4,newdata=data.frame(rank_own=c(0,.5,1),bmF="1"))
+pred_est4
+all.equal(pred_est4[["2"]],coef(group_means)[[1]])
+## So, again, the intercept is the **predicted** mean of the outcome in the first group (the
+## excluded group) when the explanatory variable is 0. (Although, as we see
+## here, this prediction is not exactly the same as the mean of the outcome in
+## that group).
+meddat2 %>% filter(bmF=="1") %>% dplyr::select( rank_own, nhOwn, HomRate08)
+meddat2 %>% filter(bmF=="1") %>% dplyr::select( rank_own, nhOwn, HomRate08) %>%
+    summarize(mean(HomRate08))
+```
+
+>Answer
+  The intercept of the 'est4' model represents the expected value of the dependent variable 'HomRate08' when 'rank_own' is 0 in the first block. Since we are dealing with categorical variables in the regression model, the block number is converted into dummy variables. Specifically, there are currently 19 blocks, and blocks 2 to 19 are categorized as dummy variables. The first block (bmF = 1) serves as the reference category, and the remaining blocks are expressed in terms of their relative differences from the reference block. Typically, the intercept represents the predicted value of the dependent variable when the explanatory variable is 0, but since this is a regression model with categorical variables, the intercept here indicates the average value of the dependent variable for the reference block. Additionally, by observing that the intercept in the code matches the mean of the first block, `r mean(meddat2 %>% filter(bmF == "1") %>% pull(HomRate08))`, we can verify the previous statement that the intercept is associated with group 1.
+
+
+
+
+
+This next allows us to explore the within pair differences --- here we look at
+how differences in proportion home ownership within pair relate to differences
+in homocide rate within pair.
+
+```{r}
+## More exploring about the pair-differences
+g1 <- ggplot(data=pair_diffs,aes(x=own_diff,y=hr_diff))+
+    geom_point()+
+    geom_smooth(method="loess",se = FALSE,method.args=list(family="symmetric")) +
+    geom_smooth(method="loess",se =
+        FALSE,method.args=list(family="symmetric",span=.5,deg=1),col="orange")
+
+g1
+```
+
+>Answer
+  This graph is quite intriguing. Although, as mentioned below, the graph is made from data that doesn't account for proportions, it still demonstrates that the relationship between the variables is not linear. The level of violence rises and falls after reaching a certain point in homeownership. For example, based on just this data, we could use the pattern of change in a specific segment to examine how the relationship between the variables changes around a threshold using Regression Discontinuity Design (RDD).
+
+So far our analysis asked, "Did the neighborhood in the pair with higher home
+ownership have less or more violence, on average, than the neighborhood in the
+pair with less home ownership." This ignores the *size* of the difference in
+proportion owning a home and in exchange allows us to simplify the question.
+That said, we can also look how the mean neighborhood violence differs given
+different magnitude of differences within pair. What about when we are looking
+at the difference in violence associated linearly with continuous differences
+in home ownership? (i.e. looking at how differences in violence are associated
+with differences in home ownership in proportions). Notice below that we have
+the same methods as above (only that the `difference_in_means` doesn't work
+because we don't have a binary explanatory variable.)
+
+In each case the interpretation is about average differences in outcome for a
+one unit difference in the explanatory variable (which is really large, it is
+the maximum difference between any two neighborhoods on the explanatory.)
+
+
+
+
+```{r}
+## Still restricting attention to pairs that are not identical so that we can be
+## using the same observations for both analyses.
+
+est1cont <- lm_robust(hr_diff~own_diff-1,data=pair_diffs)
+
+est3cont <- lm_robust(HomRate08~nhOwn,fixed_effects=~bmF,data=meddat2,subset=rank_own!=.5)
+est4cont <- lm_robust(HomRate08~nhOwn+bmF,data=meddat2,subset=rank_own!=.5)
+
+meddat2 <- meddat2 %>% group_by(bmF) %>% mutate(own_md=nhOwn - mean(nhOwn)) %>% ungroup()
+est5cont <- lm_robust(hr_md~own_md,data=meddat2,subset=rank_own!=.5)
+
+meddat2 %>% filter(bmF=="1") %>% dplyr::select(nhOwn,rank_own,own_md,HomRate08,hr_md) %>% head()
+pair_diffs %>% filter(bmF=="1")
+
+## Again, showing how all of these aproaches which appear different on their face are the same:
+rbind(est1cont=coef(est1cont)[["own_diff"]],
+    est3cont=coef(est3cont)[["nhOwn"]],
+    est4cont=coef(est4cont)[["nhOwn"]],
+    est5cont=coef(est5cont)[["own_md"]])
+
+```
+> Answer
+  This code uses the difference in homeownership as a continuous variable in regression analysis to quantitatively estimate the effect of this difference on the dependent variable. 'rank_own' represents the relative position of homeownership between a pair of two areas. If it is 0, the area has relatively low homeownership, and if it is 1, the area has relatively high homeownership. 'own_md' represents the value of homeownership ('nhOwn') centered around the mean, meaning that if this value is positive, the homeownership rate is higher than the block average. Looking at the analysis results, although different regression models were used, the same value of -1.17 was found. This means that for every 1-unit increase in the difference in homeownership, the difference in violence levels decreases by 1.17 units on average.
+
+So, the average proportion HS among those neighborhoods higher on home
+ownership within a pair was .55 and the average proportion HS education was .60 among
+those neighborhoods lower on home ownership within a pair. But this difference
+of .08 would not be surprising from the perspective of a randomized experiment
+within pairs like this. And, in fact, the overall pattern is similar to what
+we'd see in a randomized experiment (as we can see from the omnibus test).
+
+Can you replace `rank_own` with an actually randomized treatment here
+(randomized within pair)? What does `balanceTest` report when  you do the test
+using that variable? (The point here is to see what would happen if, in fact,
+rank of home ownership were really randomized within pair of neighborhoods.)
+
+How different are the neighborhoods within pair on key covariates? (I'm
+thinking of baseline Homocide Rate myself, but you might want to look at some
+others.) You can use code from previous explorations to summarize these
+differences within pair.
+
+How do the estimates of relationships conditioning on pair differ from the
+estimates that did not? Were there any substantive changes in the
+interpretation? (The previous work on matching offers hints about how to
+estimate effects conditional on the stratification.)
+
+How might we improve this matching? (See, for example, the help page for
+`nmatch` for some ideas.)
+
+
+
+```{r}
+
+# 1. Replace `rank_own` with a randomized treatment
+set.seed(0513)  
+meddat2$rand_treatment <- meddat2 %>%
+  group_by(bm) %>%
+  mutate(rand_treatment = sample(c(0, 1), n(), replace = FALSE)) %>%
+  pull(rand_treatment)
+
+# 2. balanceTest with randomized treatment
+balance_summary <- meddat2 %>%
+  group_by(rand_treatment) %>%
+  summarize(
+    nhClass_mean = mean(nhClass, na.rm = TRUE),
+    HomRate03_mean = mean(HomRate03, na.rm = TRUE),
+    nhTP03_mean = mean(nhTP03, na.rm = TRUE),
+    nhAgeYoung_mean = mean(nhAgeYoung, na.rm = TRUE),
+    nhAboveHS_mean = mean(nhAboveHS, na.rm = TRUE),
+    .groups = 'drop'
+  )
+balance_summary
+
+# 3. Calculate standardized mean difference for each covariate
+calculate_smd <- function(var, treatment, data) {
+  mean_treated <- mean(data[[var]][data[[treatment]] == 1], na.rm = TRUE)
+  mean_control <- mean(data[[var]][data[[treatment]] == 0], na.rm = TRUE)
+  sd_pooled <- sd(data[[var]], na.rm = TRUE)
+  return((mean_treated - mean_control) / sd_pooled)
+}
+
+smd_nhClass <- calculate_smd('nhClass', 'rand_treatment', meddat2)
+smd_HomRate03 <- calculate_smd('HomRate03', 'rand_treatment', meddat2)
+smd_nhTP03 <- calculate_smd('nhTP03', 'rand_treatment', meddat2)
+smd_nhAgeYoung <- calculate_smd('nhAgeYoung', 'rand_treatment', meddat2)
+smd_nhAboveHS <- calculate_smd('nhAboveHS', 'rand_treatment', meddat2)
+
+smd_summary <- data.frame(
+  covariate = c('nhClass', 'HomRate03', 'nhTP03', 'nhAgeYoung', 'nhAboveHS'),
+  smd = c(smd_nhClass, smd_HomRate03, smd_nhTP03, smd_nhAgeYoung, smd_nhAboveHS)
+)
+smd_summary
+
+# 4. Evaluate differences in covariates
+pair_diff_summary <- meddat2 %>%
+  group_by(bm) %>%
+  summarize(homicide_rate_diff = diff(HomRate03), .groups = 'drop')
+
+pair_diff_summary
+
+# 5. Evaluate the difference between conditional and non-conditional estimates
+lm_pair <- lm_robust(HomRate08 ~ rand_treatment + bmF, data = meddat2)
+lm_pair
+
+# Simple regression analysis without considering pairs
+lm_simple <- lm_robust(HomRate08 ~ rand_treatment, data = meddat2)
+lm_simple
+
+# Compare the results of the two models
+coef(lm_pair)
+coef(lm_simple)
+
+# 6. Ways to improve matching
+# Suggest ways to improve matching using the `nmatch` function.
+library(designmatch)
+nearlist <- list(covs = as.matrix(meddat$HomRate03), pairs = c(HomRate03 = 1))
+solverlist <- list(name = "highs", approximate = 1, t_max = 1000, trace = 1)
+
+mh_pairs_improved <- nmatch(
+  dist_mat = matchdist_mat,
+  near = nearlist,
+  subset_weight = 1,
+  solver = solverlist
+)
+
+# Check the improved matching results
+mh_pairs_df_improved <- nmatch_to_df(mh_pairs_improved, origid = meddat$nh)
+mh_pairs_df_improved
+
+
+
+```
+>Answer
+  As mentioned in the above question, the average high school graduation rate in areas with higher homeownership within a pair was 0.55, while it was 0.60 in areas with lower homeownership. This indicates a difference in high school graduation rates within pairs. In the given results, we can also confirm this difference of 0.2629 through the nhAboveHS_mean value. However, as noted, this difference is 'not particularly surprising from the perspective of a randomized experiment within pairs,' and since the standardized mean difference (SMD) for other covariates in the balanceTest is close to 0, it suggests that the matching was generally well executed.
+  Regarding the question about replacing rank_own with an actually randomized treatment variable and performing the balanceTest, the regression analysis result using rand_treatment as the randomized treatment variable showed an estimate of -0.105. This suggests that areas with higher homeownership may have slightly lower levels of violence compared to areas with lower homeownership. However, the p-value was 0.422, indicating that the effect is not statistically significant, meaning that randomizing the homeownership rank within pairs does not show a strong effect.
+  For the question about differences in key covariates within pairs, looking at homicide rates (homicide_rate_diff), the differences range from -0.4033 to 1.8582. This shows that there can be substantial differences in violence levels within neighboring areas in a pair, suggesting that such differences could impact the analysis if pairs are not taken into account.
+  There was a significant difference in interpretation between estimates that took pairs into account and those that did not. Controlling for block differences allowed specific block effects to be identified. Without controlling for block effects, it was not possible to distinguish these differences between blocks, resulting in only an average effect estimate, which led to substantial differences in the interpretation
+
+
+# References
+
