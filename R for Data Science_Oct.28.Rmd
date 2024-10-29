@@ -1,0 +1,50 @@
+---
+title: "Oct.28"
+author: "DOKYUNG JANG"
+date: "2024-10-29"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(tidyverse)
+mpg
+
+ggplot(data = mpg) +
+  geom_point(mapping = aes(x = displ, y =hwy))
+
+
+#run ggplot(data = mpg) what do you see?
+ggplot(data = mpg)
+
+## the code creats an empty plot. the ggplot() function creats the backgorund of the plot, but since no layers were specified with geom function, nothing is drawn. 
+
+#how many rows are in mtcars? homw many columns?
+nrow(mtcars)
+glimpse(mtcars)
+
+
+#what does the drv variable describe? read the help for ?mpg to find out
+
+?mpg
+## It refers to the type of drive train, where f = front-wheel drive, r = rear wheel drive, 4 = 4wd
+
+# make a scatterplot of hwy versus cyl
+
+ggplot(data = mpg) +
+  geom_point(mapping = aes(x = hwy, y = cyl))
+
+
+# what happens if you make a scatterplot of class versus drv? why is the plot not useful?
+
+ggplot(data = mpg) +
+  geom_point(mapping = aes(x = class, y = drv))
+
+##A scatter plot is not a useful display of these variables since both drv and class are categorical variables. 
+
+
+```
+
