@@ -1,0 +1,369 @@
+---
+title: 'Exploration 8: Stratified Adjustments for Longitudinal Data'
+afthor: 'Jake Bowers'
+date: '`r format(Sys.Date(), "%B %d, %Y")`'
+format:
+  html:
+    code-fold: true 
+  pdf:
+    number-sections: true
+    colorlinks: true
+    cite-method: biblatex
+    keep-tex: true
+    monofontoptions: "Scale=0.7"
+    include-in-header: 
+      text: |
+        \usepackage{bm}
+        \usepackage{amsmath, booktabs, caption, longtable,listings,fancyvrb,fvextra}
+        \DeclareOldFontCommand{\bf}{\normalfont\bfseries}{\mathbf}
+fontsize: 10pt
+geometry: margin=1in
+graphics: yes
+bibliography: classbib.bib
+biblio-style: "authoryear-comp,natbib"
+---
+
+\input{mytexsymbols}
+
+```{r setup0, echo=FALSE, results=FALSE, include=FALSE, cache=FALSE}
+library(here)
+source(here("qmd_setup.R"))
+```
+
+
+# Useful reading
+
+See the syllabus and @rosenbaum2020modern
+
+See also @imai2021use,@imai2021matching,@imai2019should and the `PanelMatch` package for R.
+
+And for another set of approaches using different assumptions that we have been
+covering in this class("Difference in Differences") see @keele2021suppressing
+(especially the online appendix/supplementary materials).
+
+The data for this exploration come from <https://www.pippanorris.com/data> where there is a great dataset describing UK Constituencies:
+
+> Description: This dataset includes parliamentary constituency results for
+> four successive UK General Elections (held on the 6th May 2010, 7th May 2015,
+> 8th June 2017, and 12th December 2019). It also contains the estimated Brexit
+> referendum vote by constituency (calculated by  Chris Hanretty) and the 2011
+> census results.  The data-set includes the share of the vote for each party,
+> the candidates for each party, the vote swing, seat changes, and 2011
+> constituency demographics.
+
+The question is whether the political organizing done by
+[UKIP](https://en.wikipedia.org/wiki/UK_Independence_Party) that led to their
+surprising gains in vote share in 2015 ended up as a major driver of Brexit
+voting (in the Brexit Referendum of 2016). The counter argument to this claim
+is that the kinds of places where UKIP got a lot of support (for example,
+places that differed from other places in regards income or immigration) are
+just the kinds of places that would have voted for Brexit even if UKIP had not
+campaigned there. That is, we have one explanation based on politics and
+another based on the social-bases for politics.
+
+(1) If we could somehow randomly assign UKIP voting to constituencies, how
+would that research design help answer the debate?
+
+(2) Since we cannot go back in history and run an RCT of this kind, we can
+create a different research design. We can compare the 2016 Brexit vote in
+places equally likely to have had high UKIP support in 2015 (in regards past
+UKIP support and also past social and demographic information that might
+predict UKIP support) but which differed in that support. That is what we will do today.
+
+
+
+```{r setup, echo=FALSE, results=FALSE, include=FALSE, cache=FALSE}
+library(tidyverse)
+library(estimatr)
+library(DeclareDesign)
+library(MASS)
+library(optmatch)
+library(RItools)
+library(robustbase)
+library(designmatch)
+# This next works if you have installed gurobi on your local machine
+# your version may differ. You'll need to get an academic license.
+#install.packages("/Library/gurobi952/macos_universal2/R/gurobi_9.5-2_R_4.2.0.tgz",repos=NULL)
+#failed to install..
+#library(gurobi)
+library(highs) ## highs is an open-source substitute for gurobi
+library(coin)
+library(haven)
+library(readxl)
+library(PanelMatch)
+library(here)
+library(MatchIt)
+```
+
+
+
+```{r}
+dat_brexit_vote <- read_excel(here("Data/UK_Constituencies", "eureferendum_constit.xlsx"))
+dat_wide0 <- read_dta(here("Data/UK_Constituencies", "UK GE 2010_2019 V1.9 (inc Brexit EU Ref vote and 2011 Census).dta"))
+
+## Check data frame 
+
+names(dat_brexit_vote)
+names(dat_wide0)
+
+
+## Check if all ids are unique
+
+stopifnot(length(unique(dat_wide0$ons_id)) == nrow(dat_wide0))
+stopifnot(length(unique(dat_brexit_vote$ons_id)) == nrow(dat_brexit_vote))
+
+## Add final brexit vote
+
+dat_wide <- left_join(dat_wide0, dat_brexit_vote, by = "ons_id")
+
+dat_wide$Con19 <- dat_wide$CON19
+dat_wide$Con17 <- dat_wide$con17
+dat_wide$Lab17 <- dat_wide$lab17
+dat_wide$Leave16 <- dat_wide$leave
+```
+
+Often longitudinal data come in "wide" form:
+
+```{r}
+dat_wide %>% dplyr::select(constituency_nameA, UKIP10, UKIP15, UKIP17, Con10, Con15, Con17, Con19, Leave16, c11BornEngland)
+```
+
+And also they can come in "long" form:
+
+```{r}
+#| echo: FALSE
+#| results: FALSE
+
+## Convert to Long Form just the variables we want.
+
+census_vars <- grep("c11", names(dat_wide), value = TRUE)
+new_census_names0 <- gsub("c11", "", census_vars)
+new_census_names <- paste0(new_census_names0, "11")
+
+dat_long_pol <- dplyr::select(dat_wide, one_of(
+  "ons_id", "constituency_nameA", "Leave16", "UKIP10", "UKIP15", "UKIP17",
+  "Con10", "Con15", "Con17", "Con19",
+  "Lab10", "Lab15", "Lab17", "Lab19"
+)) %>%
+  pivot_longer(
+    cols = -one_of("ons_id", "constituency_nameA"),
+    names_to = c(".value", "year"), names_pattern = c("([A-Za-z]+)([0-9]+)")
+  ) %>%
+  mutate(year = as.integer(year)) %>%
+  arrange(ons_id, year)
+glimpse(dat_long_pol)
+
+dat_long_census <- dplyr::select(dat_wide, one_of("ons_id", "constituency_nameA"), starts_with("c11")) %>%
+  pivot_longer(
+    cols = -one_of("ons_id", "constituency_nameA"),
+    names_to = c("junk", "year", ".value"),
+    names_pattern = c("(c)(11)(.+)")
+  ) %>%
+  mutate(year = as.integer(year)) %>%
+  arrange(ons_id, year)
+
+glimpse(dat_long_census)
+dat_long_census$junk <- NULL
+
+## Add the two long form datasets back to gether
+dat_long <- full_join(dat_long_pol, dat_long_census, by = c("ons_id", "constituency_nameA", "year")) %>% arrange(ons_id, year)
+head(dat_long)
+```
+
+```{r}
+dat_long %>% dplyr::select(ons_id, constituency_nameA, year, UKIP, Con, Leave, BornEngland, Employed, Population)
+```
+
+Both forms contain the same information.
+
+For our purposes, we want to find constituencies with high UKIP support in 2015
+(as a proxy, under the "political" explanation for UKIP mobilization and
+organizing) and compare their Brexit vote with constituencies with low UKIP
+support in 2015. And we'd like to dispel arguments that background
+characteristics like demographics are the actual explanation. This research
+design logic suggests that we use the **wide** form of the data to create the
+design. That is, we want to find constituencies that, up to the year of the
+UKIP mobilization in 2015, look like good counterfactuals for the
+constituencies which in fact had a lot of UKIP mobilization and support, but
+which in fact did not have such high support. 
+
+Your job is to create a matched design, using `nmatch` in the `designmatch`
+package that (1) creates pairs of constituencies that differ on `UKIP15` but
+that differ little on relevant Census data ("relevant" might mean Census
+variables that predict `UKIP15`) or you might prefer to use past political
+variables like `UKIP10`,`Con10`,`Lab10`,`BNP10`,`PC10`,`Green10`, etc.. (under
+the idea that differences in past voting captures differences in the social
+bases for politics) and (2) test hypothesis that differences in UKIP support in
+2015 had no effect on Brexit vote (`Leave16`)  and (3) estimate the size of
+this effect (recalling that you have two ways to do this when you use
+non-bipartite matching). If you have time, you should execute a sensitivity
+analysis of your results.
+
+First, I am going to code missing data on `UKIP15` as 0 (this is not a general
+practice. but I think it is sensible in this case --- it is not that we do not
+know the UKIP vote for these places, it is that UKIP didn't contest those
+elections so they got 0 votes. Our theory suggests that getting 0 votes is in
+fact a sign of ineffective mobilization, so I feel justified in this
+imputation.)
+
+```{r}
+dat_wide <- dat_wide %>% mutate(
+  UKIP15noNA = ifelse(is.na(UKIP15), 0, UKIP15),
+  UKIP10noNA = ifelse(is.na(UKIP10), 0, UKIP10)
+)
+
+#dplyr::select(constituency_nameA, UKIP10, UKIP15, UKIP17, Con10, Con15, Con17, Con19, Leave16, c11BornEngland)
+```
+
+Then I am going to make sure the outcome (`Leave16`) has no missing data:
+
+```{r}
+summary(dat_wide$Leave16)
+```
+
+Now you can use the past explorations to create a design, evaluate it
+substantively and in comparison to a randomized experiment (recall the trick
+where I ranked members of a pair as "high" versus "low" which then allowed me
+to use `balanceTest` or `independence_test` to make this comparison), test a
+simple null hypothesis, estimate an effect (probably an averagate treatment
+effect), and perhaps complete a sensitivity analysis.
+
+
+
+
+```{r}
+
+
+covs <- c("Con10", "Lab10", "c11BornEngland", "c11Unemployed")
+covmat <- dplyr::select(dat_wide, one_of(covs))
+
+# remove missing value 
+dat_wide <- dat_wide[complete.cases(covmat), ]
+
+covmat <- dplyr::select(dat_wide, one_of(covs))
+
+# Mahalanobis distance
+dat_wide$covmh <- mahalanobis(
+  x = covmat,
+  center = colMeans(covmat),
+  cov = cov(covmat)
+)
+
+
+
+mhdist_mat <- outer(dat_wide$covmh, dat_wide$covmh, FUN= function(x, y){ abs(x-y)})
+
+View(mhdist_mat)
+
+```
+
+
+Now, we can match on those distances:
+
+```{r}
+
+# mean-centered distances
+matchdist_mat <- round(mhdist_mat / mean(mhdist_mat), 2)
+
+# Restrict matching if the difference between certain covariates is greater than 2
+nearlist <- list(
+  covs = as.matrix(dplyr::select(dat_wide, c("Con10", "Lab10", "c11BornEngland", "c11Unemployed"))),
+  pairs = c(Con10 = 0.5, Lab10 = 0.5, c11BornEngland = 0.5, c11Unemployed = 0.5)
+)
+
+
+solverlist <- list(name = "highs", approximate = 1, t_max = 1000, trace = 1)
+
+mh_pairs <- nmatch(
+  dist_mat = matchdist_mat,
+  near = nearlist,
+  subset_weight = 1,
+  solver = solverlist
+)
+
+## look at raw mh_pairs output.
+## mh_pairs
+## Looks like neighborhood 6 is matched with neighborhood 1, etc..
+
+# Function to convert the output of nmatch into a factor variable for use in analysis
+nmatch_to_df <- function(obj, origid) {
+  matchesdat <- data.frame(
+    bm = obj$group_id,
+    match_id = c(obj$id_1, obj$id_2)
+  )
+  matchesdat$ons_id <- origid[matchesdat$match_id]  
+  return(matchesdat)
+}
+
+# Merge the match result
+mh_pairs_df <- nmatch_to_df(mh_pairs, origid = dat_wide$ons_id)  
+mh_pairs_df$nh <- mh_pairs_df$ons_id  
+
+dat_wide2 <- inner_join(dat_wide, mh_pairs_df, by = "ons_id")
+dat_wide2 <- droplevels(dat_wide2)
+
+#number of matches
+nrow(mh_pairs_df)
+nrow(dat_wide2)
+
+```
+```{r}
+# Rank UKIP 16, leave 16
+dat_wide2 <- dat_wide2 %>%
+  group_by(bm) %>%
+  mutate(
+    rank_ukip15 = rank(UKIP15) - 1,
+    rank_leave16 = rank(Leave16) - 1
+  ) %>%
+  arrange(bm) %>%
+  ungroup()
+
+# remove ties
+dat_wide3 <- dat_wide2 %>% filter(rank_ukip15 != 0.5)
+
+# covariate balance tests
+newcovs <- c("Con10", "Lab10", "c11BornEngland", "c11Unemployed")
+balfmla <- reformulate(newcovs, response = "rank_ukip15")
+xb_ukip15 <- balanceTest(update(balfmla, . ~ . + strata(bm)), data = dat_wide3)
+
+# result
+xb_ukip15$overall
+xb_ukip15_vars <- data.frame(xb_ukip15$results[, c("Control", "Treatment", "adj.diff", "std.diff", "p"), "bm"])
+
+# sort and check 
+arrange(xb_ukip15_vars, p) %>% zapsmall(digits = 5)
+stopifnot(xb_ukip15$overall[, "p.value"] > 0.3)
+
+
+```
+
+
+
+```{r}
+# estimate ATE
+# Leave16 ~ rank_ukip15
+ate_1 <- difference_in_means(Leave16 ~ rank_ukip15, blocks = bm, data = dat_wide3, subset = rank_ukip15 != 0.5)
+
+ate_2 <- lm_robust(Leave16~rank_ukip15,fixed_effects=~bm,data=dat_wide3,subset=rank_ukip15!=.5)
+
+
+# Result
+summary(ate_1)
+coef(ate_1)
+coef(ate_2)
+
+```
+> I controlled covariates through 1:1 matching using Mahalanobis distance. Given this process of matching, I explored the relationship between the approval rate of UKIP in 2015 and voting for Brexit. From the results, the coefficient is 0.07, indicating that a 10% increase in the approval rate of UKIP is associated with a 0.7% increase in the voting rate for Brexit.
+
+
+## Extra:
+
+Try out the `PanelMatch` approach from
+<https://github.com/insongkim/PanelMatch> using a dataset where the outcomes
+and the treatment might vary more over time. How would you assess the adequacy
+a design created from `PanelMatch` compared to the designs created from
+`fullmatch`, `pairmatch` or `nmatch`? (You might like to see
+<https://yiqingxu.org/tutorials/panel.html> for `PanelMatch` as well as other
+approaches.)
+
+# References
