@@ -1,0 +1,198 @@
+---
+title: "Oct.28"
+author: "DOKYUNG JANG"
+date: "2024-10-29"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+```
+#oct 28
+```{r}
+library(tidyverse)
+mpg
+
+ggplot(data = mpg) +
+  geom_point(mapping = aes(x = displ, y =hwy))
+
+
+#run ggplot(data = mpg) what do you see?
+ggplot(data = mpg)
+
+## the code creats an empty plot. the ggplot() function creats the backgorund of the plot, but since no layers were specified with geom function, nothing is drawn. 
+
+#how many rows are in mtcars? homw many columns?
+nrow(mtcars)
+glimpse(mtcars)
+
+
+#what does the drv variable describe? read the help for ?mpg to find out
+
+?mpg
+## It refers to the type of drive train, where f = front-wheel drive, r = rear wheel drive, 4 = 4wd
+
+# make a scatterplot of hwy versus cyl
+
+ggplot(data = mpg) +
+  geom_point(mapping = aes(x = hwy, y = cyl))
+
+
+# what happens if you make a scatterplot of class versus drv? why is the plot not useful?
+
+ggplot(data = mpg) +
+  geom_point(mapping = aes(x = class, y = drv))
+
+##A scatter plot is not a useful display of these variables since both drv and class are categorical variables. 
+
+
+```
+
+
+## Oct.29
+```{r}
+
+ggplot(data = mpg) +
+  geom_point(mapping = aes(x = displ, y = hwy, color = class))
+
+ggplot(data = mpg) +
+  geom_point(mapping = aes(x = displ, y =hwy, size = class))
+
+ggplot(data = mpg) +
+  geom_point(mapping = aes(x = displ, y = hwy, alpha = class))
+
+ggplot(data = mpg) +
+  geom_point(mapping = aes(x = displ, y = hwy, shape = class))
+
+ggplot(data = mpg) +
+  geom_point(mapping = aes(x= displ, y = hwy), color = "blue")
+
+
+#exercise 
+
+#what's gone wrong with this code? why are the points not blue?
+
+ggplot(data = mpg) +
+  geom_point(
+    mapping = aes(x = displ, y = hwy, color = "blue")
+  )
+
+#the argument color = "blue" is included within the mapping argument, and as such, it is treated as an aesthetic, which is a mapping between a variable and a value. in the expression, color = "blue", "blue" is interpreted as a categorical variable which only takes a single value "blue". 
+
+ggplot(data = mpg) +
+  geom_point(
+    mapping = aes(x = displ, y = hwy), color = "blue"
+  )
+
+
+#which variables in mpg are categorical? which variables are continuous? how can you see this information when you run mpg?
+
+summary(mpg)
+glimpse(mpg)
+
+#categorical = manufacturer, model, trans, drv, fl, class
+#displ, year, cyl, cty, hwy
+
+#map a continuous variable to color, size, and shape. how do these aesthetics behave differently for categorical vs. continous variables? 
+
+ggplot(mpg, aes(x= displ, y = hwy, color = cty)) +
+  geom_point()
+
+ggplot(data = mpg) +
+  geom_point(mapping = aes (x = displ, y = hwy, size = cty))
+
+
+ggplot(mpg, aes(x= displ, y = hwy, shape = cty)) +
+  geom_point()
+
+ggplot(mpg, aes(x = displ, y = hwy, color = hwy, size = displ)) + 
+  geom_point()
+
+#what does the stroke aesthetic do? what shapes does it work with?
+?geom_point
+
+
+ggplot(mtcars, aes(wt, mpg)) +
+  geom_point(shape = 21, colour = "black", fill = "white", size = 5, stroke = 5)
+
+# For shapes that have a border (like 21), you can colour the inside and
+# outside separately. Use the stroke aesthetic to modify the width of the
+# border
+
+
+#what happens if you map an aesthetic to something other than a variable name, like aes(color = displ < 5)
+
+ggplot(mpg, aes(x = displ, y = hwy, color = displ < 5)) +
+         geom_point()
+
+# aesthetics can also be mapped to expressions like displ < 5. the ggplot() functions behaves 
+# as if a temporary variable was added to the data with values equal to the result of the expresison. 
+# in this case, the result of displ < 5 is a logical variable which takes values of T or F.
+
+
+```
+## Oct.30 _exploration8
+
+## Oct.31_facet
+
+```{r}
+
+#facets
+
+ggplot(data = mpg) +
+  geom_point(mapping = aes(x = displ, y = hwy)) +
+  facet_wrap(~class, nrow=2)
+
+ggplot(data = mpg) +
+  geom_point(mapping = aes(x = displ, y =hwy)) +
+  facet_grid(drv ~ cyl)
+
+ggplot(data = mpg) +
+  geom_point(mapping = aes(x = displ, y =hwy)) +
+  facet_grid(. ~ cyl)
+
+
+glimpse(mpg)
+
+#1 what happens if you facet on a continuous variable?
+ggplot(mpg) +
+  geom_point(mapping = aes(x = displ, y = hwy)) +
+  facet_grid(year ~ cty)
+
+#the continuous variable is converted to a categorical variable, and the plot contains a facet for each distinct value.
+
+#2 what do the empty cells in plot with fact_grid(drv~cyl) mean? how do they relate to this plot? 
+ggplot(data = mpg) +
+  geom_point(mapping = aes(x = drv, y=cyl))
+
+ggplot(data = mpg) +
+  geom_point(mapping = aes(x = hwy, y = cty)) +
+  facet_grid(drv ~ cyl)
+
+#3 what plots does the following code make? what does .do?
+ggplot(data = mpg) +
+  geom_point(mapping = aes(x = displ, y = hwy)) +
+  facet_grid(drv ~ .)
+
+ggplot(data = mpg) +
+  geom_point(mapping = aes(x = displ, y = hwy)) +
+  facet_grid(~drv )
+
+
+ggplot(data = mpg) +
+  geom_point(mapping = aes(x = displ, y = hwy)) +
+  facet_grid(. ~ drv)
+
+ggplot(data = mpg) +
+  geom_point(mapping = aes(x = displ, y = hwy)) +
+  facet_grid(. ~ cyl)
+
+#4 Take the first faceted plot in this section:
+
+ggplot(data = mpg) +
+  geom_point(mapping = aes(x = displ, y = hwy)) +
+  facet_wrap(~class, nrow = 2)
+
+```
+
