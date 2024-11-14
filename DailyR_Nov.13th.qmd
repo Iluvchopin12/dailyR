@@ -1,0 +1,507 @@
+---
+title: 'Exploration 10: What do the standard errors in the canned regression table have to do with frequentist standard errors that we could calculate using the bootstrap? Or what do the p-values have to do with those we could create with permutations?'
+author: 'Jake Bowers'
+date: '`r format(Sys.Date(), "%B %d, %Y")`'
+format:
+  html:
+    code-fold: true
+    method: mathjax
+    url: "https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js" 
+  pdf:
+    number-sections: true
+    colorlinks: true
+    cite-method: biblatex
+    keep-tex: true
+    monofontoptions: "Scale=0.7"
+    include-in-header: 
+      text: |
+        \usepackage{bm}
+        \usepackage{tikz}
+        \usepackage{tikz-cd}
+        \usetikzlibrary{arrows,automata,positioning,trees,decorations.markings}
+        \usepackage{tikz-qtree}
+        \usepackage{amsmath, booktabs, caption, longtable,listings,fancyvrb,fvextra}
+        \DeclareOldFontCommand{\bf}{\normalfont\bfseries}{\mathbf}
+        \newfontfamily\grouptwofont[Ligatures=TeX]{Fira Sans}
+fontsize: 10pt
+geometry: margin=1in
+graphics: yes
+bibliography: classbib.bib
+biblio-style: "authoryear-comp,natbib"
+---
+
+\input{mytexsymbols}
+
+```{r setup, echo=FALSE, results=FALSE, include=FALSE, cache=FALSE}
+library(here)
+source(here("qmd_setup.R"))
+```
+
+<!-- \\newcommand{\\bbeta}{{\\symbf{\\beta}}} -->
+
+```{r loadlibs, echo=FALSE, include=FALSE, results=FALSE}
+library(tidyverse)
+library(DeclareDesign)
+```
+
+Useful reading about robust standard errors, and standard errors as derived
+using math and assumptions rather than from repeating an operation like
+re-sampling or re-assigning treatment.
+
+ - @angrist2009mostly (Chapter 3 on robust standard errors and heteroskedasticity)
+ - @angrist2014mastering (Appendices on regression theory and standard errors for Regression)
+ - @imai2018quantitative (Chapter 7)
+ - @achen82 (Whole book. A classic on standard errors from OLS.)
+ - @fox2016applied (Chap 6,9)
+ - @berk04 ( Chapter 4,6 )
+
+\fullcite[Chap 7]{gelman2007dau} (using the large sample theory to
+interpret and assess the linear model)
+
+```{r eval=FALSE,echo=FALSE,results='hide',cache=TRUE}
+## This code chunk is not necessary but may help you understand what is in the nes08gini.df.rda file
+ushistgini.df <- read.csv(here::here("Data", "us-states-gini-hist.csv"),
+  strip.white = TRUE,
+  skip = 10, as.is = TRUE
+)
+usgini2009.df <- read.csv(here::here("Data", "us-states-gini.csv"), strip.white = TRUE, as.is = TRUE)
+row.names(ushistgini.df) <- ushistgini.df$StateAb
+row.names(usgini2009.df) <- usgini2009.df$StateAb
+ushistgini.df[row.names(usgini2009.df), "Gini.H2009"] <- usgini2009.df$Gini.H2009
+
+load(here::here("Data", "nes08.rda"))
+
+## V085199a    R2a. DHS: How likely R to: join in a protest march or rally
+## V085201a    R4a. DHS: Has R ever: joined a protest march or rally
+## V085202a    R4a1. DHS: Worry about arrest when R joined protest march
+## V083218x    Y3x. SUMMARY: R educational attainment
+## V083221     Y5. Is R or has R ever been in the military
+## V083266a    Y32a. How long lived in this community: years
+## V083215x    Y1x. Age of Respondent
+
+## StateAb
+## table(nes08.df$V081201a)
+nes08.df$StateAb <- nes08.df$V081201a
+nes08.df$protest <- as.numeric(nes08.df$V085201a == 1)
+
+nes08gini.df <- merge(x = nes08.df, y = ushistgini.df, by = "StateAb", all.x = TRUE) ## not all states in the nes
+
+nes08gini.df$GiniChange99to09 <- nes08gini.df$Gini.H2009 - nes08gini.df$Gini.H1999
+nes08gini.df$GiniChange79to09 <- nes08gini.df$Gini.H2009 - nes08gini.df$Gini.H1979
+## install.packages("car") ## This may not be necessary so I have commented it out
+library(car)
+## Recode this variable into 1= ``college or more'' versus 0=``less than college'' category:
+nes08gini.df$BAplus <- car::Recode(nes08gini.df$V083218x, "6:7=1;0:5=0")
+## with(nes08gini.df,table(BAplus,V083218x,useNA="ifany")) ## check the recoding
+
+## Recode Gini.H2009 to run from 0 at the minimum to 1 at the maximum so that we can talk about
+## differences between the most and least equal places using our coefficients
+nes08gini.df$Gini.H2009.01 <- with(nes08gini.df, (Gini.H2009 - min(Gini.H2009)) / (max(Gini.H2009) - min(Gini.H2009)))
+## summary(nes08gini.df$Gini.H2009.01) ## check the recode
+## cor(nes08gini.df[,c("Gini.H2009.01","Gini.H2009")]) ## check the recode
+
+save(nes08gini.df, file = "nes08gini.df.rda")
+
+head(nes08gini.df)
+
+
+```
+
+The diplomat calls again. This time the problem involves the USA. Her boss read a history of the Arab Spring and a newspaper article about the petitions to secede from the USA that have been particularly popular in the south. The boss wants to know whether the economic inequality at the state level seems to predict protest behavior, and whether increasing college loans (and ensuring more college degrees) would diminish the threat of a Southern Spring (i.e mass protests in the USA).[^1]
+
+[^1]:  See <http://www.npr.org/blogs/itsallpolitics/2015/05/02/403865824/texas-governor-deploys-state-guard-to-stave-off-obama-takeover> and <https://en.wikipedia.org/wiki/2012_state_petitions_for_secession>
+
+By now the diplomat is comfortable with R and data in general so she merges State level GINI coefficients onto the 2008 American National Election study data. Sadly she is using R as if she learned it before the tidyverse was invented.
+
+```{r }
+load(url("http://jakebowers.org/PS531Data/nes08gini.df.rda"))
+
+library(car)
+## Recode this variable into 1= ``college or more'' versus 0=``less than college'' category:
+nes08gini.df$BAplus <- car::Recode(nes08gini.df$V083218x, "6:7=1;0:5=0")
+
+table(nes08gini.df$BAplus, nes08gini.df$V083218x, useNA = "ifany")
+
+## Recode GiniH2009 to run from 0 at the minimum to 1 at the maximum so that we can talk about
+## differences between the most and least equal places using our coefficients
+nes08gini.df$GiniH200901 <- with(nes08gini.df, (Gini.H2009 - min(Gini.H2009)) / (max(Gini.H2009) - min(Gini.H2009)))
+## summary(nes08gini.df$Gini.H2009.01) ## check the recode
+## cor(nes08gini.df[,c("GiniH200901","Gini.H2009")]) ## check the recode
+nes08gini.df$voted <- as.numeric(nes08gini.df$V085036x == 1)
+## with(nes08gini.df,table(voted,V085036x,useNA='ifany'))
+nes08gini.df$milserv <- ifelse(nes08gini.df$V083221 %in% c(1, 2), 1, 0)
+## with(nes08gini.df,table(milserv,V083221,useNA='ifany'))
+## summary(nes08gini.df[,c("voted","milserv")])
+
+nes08small <- na.omit(nes08gini.df[, c("GiniH200901", "BAplus", "protest", "StateAb", "voted", "milserv")])
+```
+
+She then does the following:
+
+```{r warning=FALSE}
+X <- model.matrix(~GiniH200901, data = nes08small)
+y <- nes08small$protest
+
+b <- solve(t(X) %*% X) %*% t(X) %*% y
+## b <- solve(crossprod(X)) %*% crossprod(X,y)
+b
+
+
+#residuals
+ehat <- y - (X %*% b)
+names(ehat) <- row.names(nes08small)
+
+#residuals variance 
+sigma2 <- sum(ehat^2) / (nrow(nes08small) - length(b))
+sigma2
+
+#variance-covairnace matrix 
+vcovb <- sigma2 * solve(t(X) %*% X)
+
+#standard errors
+seb <- sqrt(diag(vcovb))
+seb
+
+
+cbind(b = b[, 1], seb)
+
+tstat<-b/seb
+tstat
+
+ptstat<-2*pmin( 1-pt(tstat,df=(nrow(nes08small)-length(b))),
+               pt(tstat,df=(nrow(nes08small)-length(b))) )
+
+ptstat
+
+## ## Or 2*pt(abs(tstat),...) since the t-dist is symmetric
+##
+## zapsmall(cbind(b,seb,tstat,ptstat))
+```
+
+Interpret her little table without mentioning statistical significance: recall
+that the outcome is protest and the explanatory variable or driver is
+*state-level income inequality* as measured by the Gini coefficient. What did she
+do? Why did she do it? What does `sigma2` in the code refer to? Why should the
+standard error increase when `sigma2` becomes large? Why should the standard
+error decrease when $\bX^T \bX$ becomes large? It might help if you redid her
+work but made the intercept 0 --- then you could go between the matrix
+operations that we see here and more simple scalar operations like variances
+and covariances, etc.
+
+#answer
+>She ran a regression to examine the relationship between protest likelihood and state-level income inequaility, represented by the Gini coefficient. From the table, intercept(b= 0.2289) is the baseline protests probability when income inequaility is at zero. The slope(b= -0.1063) means for every 1-unit increase in the scaled Gini coefficient, the protest probability decreases by 0.1063.
+>Signa2 represent the residual variance. it quantifies the average squred difference between the observed and predicted values, reflecting how well the model fits the data. Larger sigma2 means greater variability in residuals, indicating less precise predictions, which increases the uncertainty in coefficient estimates. In the same context, larger $\bX^T \bX$ reduces, making the standard error smaller. This indicates more precise estimates. 
+> Yes, like you said setting the interception to 0 simplifies the regression to focus soley on the relationship between Gini coefficient and protest. In this case, the design matrix X would not includ a intercept term, contributing to more straighforward interpretation of the B coefficient as the direct impact on income inequality. 
+
+
+
+Next she says, "Someone has asked me to make my standard errors 'robust'. What
+does this mean? What are they asking me to do? Why? How should I do it? They
+kept mentioning acronymns like HC0, HC1, HC2, HC3, etc.. What does HC0 mean?
+How does it differ from HC2? Or HC3?"
+
+#Answer
+> This issue is fundamentally linked to the variance of residuals. When we estimate regression equations using OLS, we assume that the distribution of residuals remains constant (homoscedasticity). However, in real-world data, this assumption is often violated. For instance, while consumption patterns may remain relatively consistent for individuals with lower incomes, they tend to become more diverse and harder to predict as income increases. In the previous analysis, the result showing that protests decrease as inequality rises seems counterintuitive and could be due to a violation of the homoscedasticity assumption. When homoscedasticity is violated, standard errors become unreliable, leading to distorted t-values and p-values, which may result in incorrect conclusions. A solution to this problem is the use of robust standard errors. Robust standard errors account for the actual variance patterns of residuals, providing reliable estimates even when the assumption of homoscedasticity does not hold.
+> These are different methods for calculating robust standard errors, part of the Huber-White sandwich estimator family. HC0 is the simplest robust method. It uses the squared residuals without adjustments. HC2 and HC3 applie a adustment for leverage, using the leverage for observation.
+
+
+
+Finally she asks, "Are these standard errors the 'robust cluster' kind where
+you 'cluster on' state of residence? I don't understand how to 'cluster on'
+anything or what it might mean. Why would I want to have robust clustered
+standard errors here?"
+> To "cluster on" something means to group data by a shared characteristic (e.g., similar income group) and adjust for the fact that observations within a group might be similar. For example, people living in the same state may experience similar economic or policy effects, which violates the assumption of independent errors.Standard errors are used to determine how precise your coefficient estimates are. If errors are correlated within clusters (e.g., income level), traditional standard errors may underestimate variability, leading to overly confident results. Robust clustered standard errors correct for this, providing more reliable inference.
+
+You'll need to write the code to create code to produce HC0 and HC2 standard
+errors of both the "clustered" and "unclustered" kinds (see the Angrist and
+Pischke book for discussion and guidance as well as resources online). You'll
+also need to be able to explain to her whether or not these standard errors are
+useful, when they might mislead, and sketch out how to assess their operating
+characteristics --- recall that a standard error has its own operating
+characteristics but, most importantly, contributes to the creation of null
+distributions for hypothesis testing and also to the constuction of confidence
+intervals.
+
+Do her interpretations about the relationship between state level inequality
+and protest activity change depending on how to calculate the standard error?
+> Yes, her interpretations about the relationship between state-level inequality and protest activity may change depending on how standard errors are calculated. 
+
+*Hints:* Search for R packages that do what you are trying to do in order to
+check your work (see for example the `estimatr` package and `lm_robust`)
+
+*Some other hints that may or may not work:*
+
+```{r }
+## The h matrix
+h <- diag(X %*% solve(t(X) %*% X) %*% t(X))
+N <- length(y)
+
+## Make a block diagonal sigma/middle matrix
+thesigmaHC0 <- diag(as.vector(ehat)^2, nrow = length(ehat), ncol = length(ehat))
+dimnames(thesigmaHC0) <- list(names(ehat), names(ehat))
+
+vcovHC0 <- (solve(crossprod(X)) %*% t(X)) %*% (thesigmaHC0) %*% (X %*% solve(crossprod(X)))
+vcovHC0
+
+thesigmaHC2 <- diag(as.vector(ehat)^2 / (1 - h), nrow = length(ehat), ncol = length(ehat))
+dimnames(thesigmaHC2) <- list(names(ehat), names(ehat))
+
+vcovHC2 <- (solve(crossprod(X)) %*% t(X)) %*% (thesigmaHC2) %*% (X %*% solve(crossprod(X)))
+
+## We need an N x N matrix in the middle of this next calculation
+vcovIID <- (solve(crossprod(X)) %*% t(X)) %*% (sigma2 * diag(1, N, N)) %*% (X %*% solve(crossprod(X)))
+sebIID <- sqrt(diag(vcovIID))
+
+## Make a block diagonal sigma/middle matrix
+thesigma.c <- matrix(0, nrow = N, ncol = N) ## diag(ehat^2,nrow=length(ehat),ncol=length(ehat))
+dimnames(thesigma.c) <- list(names(ehat), names(ehat))
+
+## An example with the first county:
+thestates <- unique(nes08small$StateAb)
+block1 <- outer(ehat[nes08small$StateAb == thestates[1]], ehat[nes08small$StateAb == thestates[1]])
+
+# round(block1,2)
+# round(ehat[nes08small$StateAb==thestates[1]]^2,2)
+
+thesigma.c[dimnames(block1)[[1]], dimnames(block1)[[2]]] <- block1
+round(thesigma.c[1:12, 1:12], 2)
+
+## outer(ehat[nes08small$StateAb==thestates[3]],ehat[nes08small$StateAb==thestates[3]])
+outer(c(1, 2, 3), c(4, 5, 6)) ## demonstrating outer
+
+## Doing it now for each and every state:
+for (i in unique(nes08small$StateAb)) {
+  therows <- row.names(nes08small)[nes08small$StateAb == i]
+  theblockdim <- length(ehat[therows])
+  theblock <- outer(ehat[therows], ehat[therows])
+  thesigma.c[dimnames(theblock)[[1]], dimnames(theblock)[[2]]] <- theblock
+}
+
+vcovHC0Cluster <- (solve(crossprod(X)) %*% t(X)) %*% (thesigma.c) %*% (X %*% solve(crossprod(X)))
+```
+
+After you see this, the diplomat provides you with the following letter:
+
+```{=tex}
+\begingroup \grouptwofont
+```
+Dear Colonel,
+
+Here is some of the reasoning that allows us to calculate the standard error analytically as we did above. We already know formulas for summarizing characteristics of distributions (specifically we know about means and variances). So, if we can depend on the CLT then the distribution of $\hat{\bbeta}$ is Normal. Remember that the Normal distribution is completely determined by a mean and a variance --- and the sqrt of a variance is an sd. So, again using the CLT, we just need to calculate the mean and variance of the sampling distribution of the estimator and we will have specified its sampling distribution completely (notice that we won't need to permute or resample, we'd just need to calculate two numbers for each entry in $\bbeta$).
+
+We already know from the law of large numbers that, under weak assumptions, as our sample size increases, the mean of our sampling distribution will get closer and closer (on average, across repeated samples) to the true population mean.[^2] The mean of a sampling distribution is often called the "expected value" and written $E_R(\hat{\bbeta})$. We often claim that, over repeated samples, the average of the sampling distribution would be the true population value, we'd write $E_R(\hat{\bbeta})=\bbeta$ (do you recall what this property of an estimator is called?). If this is not the case, then, the center of our sampling distribution ($E(\hat{\bbeta})$) would diverge the true $\bbeta$. We can write down a formula for this divergence as follows:
+
+[^2]: Do you understand how the law of large numbers works? Why this would be so?
+
+
+\begin{align}
+E(\hat{\bbeta})&=E((\bX^{T}\bX)^{-1}\bX^{T}\by) && \text{just the formula for $\hat{\bbeta}$} \\
+&=E((\bX^{T}\bX)^{-1}\bX^{T}(\bX\bbeta+\be)) && \text{recall $\by=\bX\bbeta+\be$} \\
+&=E((\bX^{T}\bX)^{-1}\bX^{T}\bX\bbeta)+E((\bX^{T}\bX)^{-1}\bX^{T}\be) && \text{just multiplying across}&&\\
+\intertext{recall that $(\bX^{T}\bX)^{-1}\bX^{T}\bX = \bm{1}$}
+&=\bbeta+E((\bX^{T}\bX)^{-1}\bX^{T}\be)  &&  \text{$\bbeta$ and $X$ don't vary across samples so we distribute the $E$}\\
+&=\bbeta+(\bX^{T}\bX)^{-1}\bX^{T}E(\be) && \text{or }  \bbeta+(\bX^{T}\bX)^{-1}E(\bX^{T}(\be))
+\intertext{Now if we can assume $E(\be)=0$ or, if X is not fixed we might want to assume, $E(X^{T}\be)=0$ so}
+&=\bbeta &&
+\end{align}
+
+What does it mean to assume $E(\bX^{T}\be)=0$? What does it mean to assume $E(\be)=0$. \emph{Hint:} Recall from our work on matrix algebra that $\bX^{T}y$ contains the covariances between the columns of $\bX$ and $\by$. Also recall that $\be \ne \hat{\be}$ --- the error across repeated sampling is not the same as the residuals in a given regression. And remember our discussion of bias and unbiased estimators.
+
+Now, the standard deviation is like an average of squared divergences of observations from the mean. And the standard error is no different --- only it is the average of squared divergences of sample quantities from the (unknown) population quantity across repetitions of the sampling (or other stochastic) process. Recall that the sd of some variable $x$ is just $\sqrt{\sum_{i}^n (x_i-\bar{x})^2/(n-1)}$. We can write this is in matrix form as $\sqrt{(\bx-\bar{\bx})^{T}(\bx-\bar{\bx})/(n-1)}$. That is, the sd is just the square root of the variance.
+
+> answer
+  The concepts of the central limit theorem, the law of large numbers, and standard error are closely tied to the process in the code for calculating the covariance structure of "beta hat" and estimating population characteristics based on the sample. This approach allows us to assess how accurately the sample variance and standard error represent the population.
+  For example, the central limit theorem implies that the distribution of "beta hat" will converge to a normal distribution, and the code utilizes this to calculate the variance and standard error of "beta hat." The creation of various covariance matrices in the code (e.g., `vcovHC0`, `vcovHC2`, `vcovIID`) leverages the central limit theorem to estimate the variance of "beta hat" and supports setting confidence intervals based on these estimates.
+  The code also addresses the properties of unbiased estimators and the effect of sample size increases. According to the law of large numbers, as the sample size grows, the sample mean converges to the population mean. In the code, calculating clustered standard errors serves to produce a more reliable variance estimate, enhancing the accuracy of population inference as the sample size increases.
+
+>answer
+  The assumption  $E(\bX^{T}\be)=0$ means that there is no correlation between the explanatory variables and the error term. In other words, the values of the explanatory (independent) variables are determined independently of the errors. When this assumption holds, our estimated values are unbiased estimates, meaning they are not systematically off-target. If this assumption is violated, the model may fail to accurately estimate the true values. Similarly, the assumption 
+  $E(\be)=0$ means that the average error is zero, ensuring that the prediction errors do not consistently lean in one direction. Standard deviation is a measure of how much observed values deviate from the average. On the other hand, standard error indicates how much a sample statistic might differ from the true population value. Standard error helps evaluate how consistently a sample’s result would approximate the true value if we repeatedly drew samples from the population.
+  
+
+
+```{r }
+## Showing that the matrix algebra and the scalar algebra both work
+x <- nes08small$GiniH200901
+sd(x)
+sqrt((t(x - mean(x)) %*% (x - mean(x))) / (length(x) - 1))
+sqrt(sum((x - mean(x))^2) / (length(x) - 1))
+```
+
+Ok. So now, I'll derive the variance of $\bbeta$. So, since we're dealing with a sampling distribution I'll write $E(\hat{\bbeta})$ instead of $\bar{\hat{\bbeta}}$, but otherwise we're doing the same thing as we just did above. One change here is that we don't want a single scalar, but a variance-covariance matrix to characterize the shape of our Normal distribution to which we presume our estimates have converged --- the distribution is like a hill (or a multidimensional hill). So, we'll switch the order of the transpose so that we get a $k \times k$ matrix where $k$ is the number of variables in the equation.
+
+One preliminary: We can rewrite $\hat{\bbeta}$ in terms of $\bbeta$ since $\hat{\bbeta}=(\bX^{T}\bX)^{-1}\bX^{T}\by=(\bX^{T}\bX)^{-1}\bX^{T}\bX\bbeta+(\bX^{T}\bX)^{-1}\bX^{T}\be=\bbeta+(\bX^{T}\bX)^{-1}\bX^{T}\be$. Thus, $\hat{\bbeta}-\bbeta=(\bX^{T}\bX)^{-1}\bX^{T}\be$ by simple algebra.
+
+Now:
+
+```{=tex}
+\begin{align*}
+  \var(\hat{\bbeta})&=E\left([\hat{\bbeta}-E(\hat{\bbeta})][\hat{\bbeta}-E(\hat{\bbeta})]^{T}
+  \right)\\
+  &=E\left([\hat{\bbeta}-\bbeta][\hat{\bbeta}-\bbeta]^{T}
+  \right) && \text{since $\bbeta$ is a constant}\\
+  &=E\left([(\bX^{T}\bX)^{-1}\bX^{T}\be][(\bX^{T}\bX)^{-1}\bX^{T}\be]^{T}\right)
+  && \text{since $\hat{\bbeta}-\bbeta=(\bX^{T}\bX)^{-1}\bX^{T}E(\be)$} \\
+  &=E\left((\bX^{T}\bX)^{-1}\bX^{T}\be
+  \be^{T}\bX(\bX^{T}\bX)^{-1}\right) && \text{since $(AB)^{T}=B^{T}A^{T}$ and $((\bX^{T}\bX)^{-1})^{T}=(\bX^{T}\bX)^{-1}$} \\
+  &=(\bX^{T}\bX)^{-1}\bX^{T}E(\be\be^{T})\bX(\bX^{T}\bX)^{-1} && \text{since $\bX$ are fixed here.}
+\end{align*}
+```
+\textbf{That is as far as we can go without some more assumptions.} Finally, a question for you: What is $E(\be\be^{T})$? \emph{Hint:} $\bX^{T}\bX$ was the variance-covariance matrix of the predictors (and it produces a $k \times k$ matrix since $\bX$ is $n \times k$, where $k$ is the number of coefficients estimated). Here, assume $E(e_i)=0$. And notice that $\be$ is $n \times 1$.
+
+>Answer
+
+To determine  $E(\be\be^{T})$, we examine the relationship between the residuals, or errors, in our model, where each residual represents the difference between an observed value and the model’s prediction. This requires us to make two key assumptions about the residuals. First, we assume homoscedasticity, meaning that the variance of the residuals remains constant across observations; in other words, the errors are similarly distributed throughout the dataset. Second, we assume independenceamong residuals, indicating that each residual is unaffected by others, so the error in one observation does not influence the error in another. With these assumptions, $E(\be\be^{T})$, simplifies to a form where the variance of the residuals, denoted sigma^2, is constant. This allows us to represent the variance-covariance matrix of bb^beta more  straightforwardly, with the uniform variance of the residuals directly reflected in the matrix structure.
+
+
+
+```{=tex}
+\begin{align*}
+E(\be\be^{T})&=E \left(
+\begin{bmatrix} e_1 \\ \vdots \\e_n \end{bmatrix}
+\begin{bmatrix} e_1  \dots e_n \end{bmatrix} \right)\\
+&=E\begin{bmatrix} e_1^2 & e_1 e_2 & e_1 e_3 & \dots & e_1 e_n \\
+e_2 e_1 & e_2^2 & e_2 e_3 &  \dots & e_2 e_n \\
+\vdots   &   \vdots    &  \vdots       &  \vdots      &  \vdots \\
+e_n e_1 & e_n e_2 & e_n e_3 &  \dots & e_n^2
+\end{bmatrix}
+\end{align*}
+```
+Now, the standard error reported in the canned regression table document used this formula: $\widehat{\var}(\hat{\bbeta})=\hat{\sigma}^2(\bX^{T}\bX)^{-1}$. This is much simpler than the actual variance formula with that enormous $E(\be\be^{T})$ matrix tucked inside. Here is what happens to make this transformation.
+
+```{=tex}
+\begin{align*}
+  \var(\hat{\bbeta}) &=(\bX^{T}\bX)^{-1}\bX^{T}E(\be\be^{T})\bX(\bX^{T}\bX)^{-1} \\
+  &=(\bX^{T}\bX)^{-1}\bX^{T}\sigma^2\bI\bX(\bX^{T}\bX)^{-1} && \text{assume $E(\be\be^{T})=\sigma^2\bI$} \\
+  &=\sigma^2(\bX^{T}\bX)^{-1}\bX^{T}\bI\bX(\bX^{T}\bX)^{-1} \\
+  &=\sigma^2(\bX^{T}\bX)^{-1}\bX^{T}\bX(\bX^{T}\bX)^{-1} && \text{And we can get rid of $\bI$ since $A \bI=A$}\\
+  &=\sigma^2(\bX^{T}\bX)^{-1}\\
+\end{align*}
+```
+And we estimate $\var(\hat{\bbeta})$ with $\widehat{\var}(\hat{\bbeta})=\hat{\sigma}^2(\bX^{T}\bX)^{-1}$ --- that it what was happening with the sums of the residuals and such above.
+
+If you want to use the SEs that come from the canned linear regression codes you are basically making these assumptions whether you want to or not. Do you understand what it means to assume that $E(\be\be^{T})=\sigma^2\bI$ and to estimate the scalar $\sigma^2$ with the estimated residual standard error $\hat{\sigma}^2=\hat{\be}^{T}\hat{\be}/(n-1)=\sum_i \hat{e_i}^2/(n-k)$? What are the assumptions? Compared to assumption of convergence to Normality, how heroic do you think these assumptions would be in your own datasets? \emph{Hint:} Here is how $\be \be^{T}$ simplifies under these assumptions.
+
+
+#Answer
+> The key point is that the assumption E(/be/be^T)=sigma^2/bI is made to simplify calculations. This assumption implies that the residuals have constant variance and are independent of each other. With this assumption, the originally complex variance-covariance calculations become much simpler, allowing us to easily compute the variance of the residuals. In this process, we estimate the standard error, and here, parametric inference allows us to obtain sigma^2 from the sample data. We can say that the standard error values in regression analysis are derived based on these assumptions.
+
+
+
+
+
+```{=tex}
+\begin{align*}
+  \underset{n \times n}{\sigma^2\bI}&=\begin{bmatrix} \sigma^2 & 0 & 0 & \dots & 0 \\
+    0     & \sigma^2 & 0 & \dots & 0 \\
+    \vdots  &   \vdots    &  \vdots       &  \vdots      &  \vdots \\
+    0      &     0       &   0           & 0            & \sigma^2
+  \end{bmatrix} \\
+  &=\sigma^2 \begin{bmatrix} 1 & 0 & 0 & \dots & 0 \\
+    0     & 1 & 0 & \dots & 0 \\
+    \vdots  &   \vdots    &  \vdots       &  \vdots      &  \vdots \\
+    0      &     0       &   0           & 0            & 1
+  \end{bmatrix}
+\end{align*}
+```
+
+I hope that my questions to you are not out of place. I think that you should
+probably take a statistics class given the many analysts that you have hired
+and fired and the burden you have been placing on your friends outside of our
+organization. At least you should help people use DeclareDesign to assess the
+operating characteristics of their estimators and tests.
+
+You'll never find me
+
+X \endgroup
+
+Your friend's final question is: "So, you don't need to use the bootstrap to
+produce standard errors? Why is that? When do I need to use something like the
+bootstrap and when should I feel comfortable using the analytic derivations? (I
+know that someone told me, \`As long as your testing procedure has a controlled
+false positive rate, it is fine to use.' but then I said, \`What do you mean?'
+and that person said, \`As long as your confidence intervals have correct
+coverage, then they are fine to use.' What do they mean? Can you show me
+whether or not either my simple IID+CLT approach or one of the Robust Cluster
+Standard Error based approaches has a controlled false positive rate or correct
+coverage here? Someone gave me this code as a start saying that I can use simulation to assess how well my tests and estimators are working and that DeclareDesign is a nice way to create those simulations."
+
+
+#answer
+> Standard errors can be calculated without the bootstrap because, under certain assumptions (such as homoscedasticity and independence of residuals), the standard errors of regression coefficients can be analytically estimated. According to the Central Limit Theorem (CLT), if the sample size is sufficiently large, the theoretical distribution needed for calculating standard errors will converge to a normal distribution. The formula used, Var(b^beta^)=hatσ^2(X^T/bX)^−1 is valid under these assumptions and the CLT. Therefore, analytical estimation of standard errors is reliable as long as the assumptions hold, and no additional resampling is required.
+> If the data meet the assumptions required by analytical methods, there is no need to use bootstrap. For example, if residuals are independent and have constant variance, using analytical methods is appropriate. However, if these assumptions are uncertain or if the data exhibit non-standard features (such as clustering structures, asymmetric distributions, etc.), bootstrap might be more effective. Bootstrap does not rely on assumptions to estimate standard errors and confidence intervals through resampling, thus providing more robust estimates.
+> Controlling the false positive rate refers to maintaining the significance level of a test, typically at 5%. This means minimizing the likelihood of incorrect conclusions due to errors (Type 1 errors) in the test. Correct coverage refers to the probability that confidence intervals include the true value through repeated sampling. For example, with 95% confidence intervals, 95 out of 100 samples will include the true value.
+> You can evaluate the performance of various standard error methods using simulations with the Declaredesign package. By employing the this function, you can apply and compare results across different standard error methodologies and sampling strategies. The diagnose function allows you to check metrics (such as coverage and type 1 error). This process enables you to verify the reliability of each standard error approach under various data characteristics.
+> Robust Standard Errors provide reliable standard errors when the variance of residuals is not constant (heteroscedasticity) or certain conditions are not met. Clustered Standard Errors provides standard errors by adjusting for correlations within specific groups. This clustering is relevant in situations where observations within a group are likely to be similar, and clustered standard errors reflect these characteristics to provide more accurate confidence intervals.
+
+
+
+```{r}
+## n_state <- table(nes08small$StateAb)
+
+## For now, imagine that our data is the population and assess our estimators on samples of it
+pop <- declare_model(nes08small)
+sampling_plan <- declare_sampling(
+  S = strata_rs(strata = StateAb,prob=.5),
+  legacy = FALSE
+)
+estimand1 <- declare_inquiry(diffprop = coef(lm(protest ~ GiniH200901))[[2]], label = "diffprop")
+estimand2 <- declare_inquiry(logit = coef(glm(protest ~ GiniH200901, family = binomial), label = "logit")[[2]])
+design <- pop + estimand1 + estimand2 + sampling_plan
+
+## Looks like by default it samples half the people within each stratum
+set.seed(12345)
+fakedat1 <- draw_data(design)
+table(fakedat1$StateAb)
+table(nes08small$StateAb)
+mean(fakedat1$protest)
+fakedat2 <- draw_data(design)
+mean(fakedat2$protest)
+
+estimator1 <- declare_estimator(protest ~ GiniH200901, .method = lm_robust, se_type = "classical", label = "est1")
+estimator2 <- declare_estimator(protest ~ GiniH200901, .method = lm_robust, clusters = StateAb, se_type = "CR0", label = "est2")
+estimator3 <- declare_estimator(protest ~ GiniH200901, .method = glm, family = binomial, label = "logit")
+
+options(future.globals.maxSize = 4000 * 1024^2) 
+
+
+
+des_plus_est <- design + estimator1 + estimator2 + estimator3
+str(des_plus_est)
+sims <- simulate_design(des_plus_est, sims = c(1, 1, 1, 10, 1, 1, 1),future.seed=FALSE)
+head(sims)
+
+sims %>%
+  group_by(inquiry, estimator) %>%
+  summarize(mean(estimate), unique(estimand))
+
+diagnosis <- diagnose_design(des_plus_est, bootstrap_sims = 0, sims = c(1, 1, 1, 100, 1, 1, 1),future.seed=FALSE)
+diagnosis
+
+## diag_sims <- diagnosis$simulations_df
+```
+
+Another approach to calculate different standard errors:
+
+```{r}
+library(parameters)
+## for https://easystats.github.io/parameters/articles/model_parameters_robust.html
+## https://easystats.github.io/parameters/reference/model_parameters.default.html
+## see also:
+## https://easystats.github.io/performance/
+
+lm_naive <- lm(protest~GiniH200901,data=nes08small)
+model_parameters(lm_naive)
+blah <- model_parameters(lm_naive,vcov="HC3")
+model_parameters(lm_naive,
+ vcov = "vcovCR",
+  vcov_args = list(type = "CR2", cluster = nes08small$StateAb),
+ include_info=TRUE
+)
+```
+
+>From this analysis, it is evident that the relationship between the Gini coefficient and the probability of protest is not statistically significant as I expected from the beginning. The regression coefficient for the Gini coefficient is -0.11, suggesting that the probability of protest tends to decrease as the Gini coefficient increases; however, with a p-value of 0.181, which exceeds the usual significance level of 0.05, it is not statistically significant. This suggests that the impact of the Gini coefficient on the probability of protest may not be significant.
+
+
+
+# References
