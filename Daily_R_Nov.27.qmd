@@ -1,0 +1,568 @@
+---
+title: 'Exploration 11: Maximum Likelihood --- A General Method for Creating Estimators'
+author: 'Jake Bowers'
+date: '`r format(Sys.Date(), "%B %d, %Y")`'
+format:
+  html:
+    code-fold: true
+  pdf:
+    number-sections: true
+    colorlinks: true
+    cite-method: biblatex
+    keep-tex: true
+    monofontoptions: "Scale=0.7"
+    include-in-header:
+      text: |
+        \usepackage{bm}
+        \usepackage{tikz}
+        \usepackage{tikz-cd}
+        \usetikzlibrary{arrows,automata,positioning,trees,decorations.markings}
+        \usepackage{tikz-qtree}
+        \usepackage{amsmath, booktabs, caption, longtable,listings,fancyvrb,fvextra}
+        \DeclareOldFontCommand{\bf}{\normalfont\bfseries}{\mathbf}
+fontsize: 10pt
+geometry: margin=1in
+graphics: yes
+bibliography: classbib.bib
+biblio-style: "authoryear-comp,natbib"
+---
+
+\input{mytexsymbols}
+
+```{r setup, echo=FALSE, results=FALSE, include=FALSE, cache=FALSE}
+library(here)
+source(here("qmd_setup.R"))
+library(VGAM)
+```
+
+
+Useful reading:
+
+ - \citealp{ward2018maximum} (probably the best one)
+
+ - \citealp[Chap 9.3.3]{fox2008applied}
+
+ - \citealp[Use the 2009 Version of]{green1991mle}  from \url{https://sites.google.com/site/donaldpgreen/plsc504}
+
+ - \citealp[Chap 5]{fox2011r} and see also \url{http://socserv.socsci.mcmaster.ca/jfox/Courses/SPIDA/index.html}
+
+ - \citealp[Chap 4]{king89}
+
+ - \citealp[Chap 1,2]{cox:2006}
+
+
+Our diplomat friend calls again. This time she feels particularly out of her
+depth: "My superiors want a confidence interval for the rate at which Italian
+Cabinets fail. They noted that  @cioffirevilla1984pri uses these data for the
+1946--1980 period to show that Italian governments end at a constant rate of
+.021 per week (i.e the mean length of an Italian cabinet from 1946 to 1980 was
+$1/.021 \approx 48$ weeks). But, now we have data until 1987 (there must be
+data since then too, but I can't find it when I search online):"
+
+```{r}
+
+```
+
+
+\begin{center}
+  \setlength{\tabcolsep}{2pt}
+\begin{tabular}{@{}lccccccccccccccccccccc@{}}
+\hline
+Weeks & 2 & 8 & 12 & 16 & 20 & 24 & 28 & 32 & 40 & 44 & 48 & 52 & 56 & 60 & 64 & 72 &  76 & 88 & 92 & 108 & 180 \\
+Number of Cabinets & 4 & 1 & 4 & 1 & 4 & 2 & 6 & 2 & 1 & 1 & 2 & 2 & 2 & 1 & 1 & 2 & 1 & 1 & 1 & 1 & 1 \\
+\hline
+\end{tabular}
+ \end{center}
+
+
+"Here I convert that table to a data.frame:" 
+
+
+```{r makedata}
+Weeks <- c(2, 8, 12, 16, 20, 24, 28, 32, 40, 44, 48, 52, 56, 60, 64, 72, 76, 88, 92, 108, 180)
+Num.cabinets <- c(4, 1, 4, 1, 4, 2, 6, 2, 1, 1, 2, 2, 2, 1, 1, 2, 1, 1, 1, 1, 1)
+cr.df <- data.frame(duration = rep(Weeks, Num.cabinets))
+cr.df
+```
+
+
+And I can even calculate the mean number of weeks between cabinets and convert
+it to a failure rate, following Cioffi-Revilla. But, I am flummoxed by the
+request for a confidence interval. These are the cabinets in Italy. And this is
+a univariate problem. What would statistical inference mean here? What am I
+inferring to (in an experiment I'm inferring to an unobserved counterfactual
+causal effect, in a sample survey I'm inferring to an unobserved population,
+what is unobserved here)? I noticed that in his paper, Cioffi-Revilla reports
+confidence intervals and $p$-values but does not re-sample, re-assign, let
+alone appeal to a Central Limit Theorem as an approximation to some re-sampling
+or re-assigning process to describe either the reference distribution for a
+test statistic or the sampling distribution for an estimator. It does appear
+that  he does rely on the Central Limit Theorem for statistical inference
+somehow, but I'm not sure what we should imagine is being repeated to make a
+distribution. What does he do?  What doesn't he observe that he would like to
+target with statistical inference? What is he inferring **to**? What is the
+estimand?"
+
+Later she called again, "I have figured out that he says something about a
+'data generating process' for a single duration between cabinets that, he
+claims, follows the following formula that describes the amount of time between
+cabinets using an expoential probability distribution: $pr(Y)=\theta e^{-\theta
+Y}, \; 0 \le Y$. What is a data generating process? What does this formula mean
+in the context of the durations between cabinets in Italy in this period? Does
+the set of durations look at all like they could have arisen from an
+exponential distribution with rate $\theta$? Would the `rexp` function in R be
+helpful in assessing the general claim about a process producing durations
+between cabinets?"
+
+```{r}
+## Somehow these versions of the exponential model don't seem right
+table(cr.df$duration)
+set.seed(12345)
+table(round(rexp(41, rate = 2)))
+table(round(rexp(41, rate = .1)))
+```
+> Explanation of the code
+rxep() generates random numbers from an expoenential distribution to model durations or intervals, used for comparision with observed data.The two rate values tests how different exponential distributions (fast or slow decay) match the actual data's distribution.
+
+
+
+"Now, I know that Cioffi-Revilla reports an estimate. So he must have an
+estimator and an estimand. And I assume that he has some idea about a repeated
+action. But I am confused. Here are some fragments of notes that I took, can
+you make sense of them?"
+
+
+"The likelihood function is this:
+
+$$\text{Likelihood of }\theta=L(\theta)= p(Y_1,Y_2,\ldots,Y_n|\theta)\text{ and if $Y_i$ iid $L(\theta)$}= p(Y_1|\theta)p(Y_2|\theta)\ldots p(Y_n|\theta)=\prod_{i=1}^n p(Y_i|\theta)$$
+
+But, I don't know what a likelihood function is, or why we would care. It looks
+like something to do with a joint probability. And, if we are talking about a
+joint probability, I'm confused about what kind of assumptions were required to
+go from the big joint probability function to a simple product of probability
+density functions or data generating processes. What is going on? What are the
+assumptions? Why might we believe them (or not) in this case?"
+
+> answer
+The likelihood function measures how well a parameter θ explains the data; under the i.i.d. assumptions, it simplifies to a product of individual probabilities, and MLE finds the θ that maximizes it.
+
+"The likelihood that any parameter (or set of parameters) should have any
+assigned value (or set of values) is proportional to the probability that if
+this were so, the totality of observations should be that observed."
+@fisher1922mathematical, page 310 (Fisher first invented likelihood and second
+idea of randomization-based inference [@aldrich1997ra] )
+
+The **maximum likelihood estimate** provides the value of $\theta$ for
+which the data provide the most support given the dgp --- that is makes the
+observed data 'most probable' or 'most likely'.
+
+For our data:
+
+$$L(\theta)=\prod \theta e^{-\theta X}$$
+
+
+```{r deflike}
+## The likelihood function
+L.exp.fn <- function(theta, y = cr.df$duration) {
+  prod(theta * exp(-theta * y))
+}
+
+## we could also have used Rs exp pdf fn: prod(dexp(y,rate=theta))
+
+```
+
+I plugged in lots of values for $\theta$ in the R function above and graphed
+the result. What should I learn from this graph of the likelihood function?
+
+But, in my reading I see people using the log of the likelihood function, so I
+tried to calculate what the log of the likelihood function would be:
+
+
+\begin{align*}
+\logl(\theta)&=\ln \left( \sum \theta e^{-\theta Y_i} \right) \\
+&=\sum \ln(\theta e^{-\theta Y_i}) \\
+&=\ln(\theta  e^{-\theta Y_1}+\ldots+\theta  e^{-\theta Y_n}) \\
+&=\ln(\theta  e^{-\theta Y_1})+\ldots+\ln(\theta  e^{-\theta Y_n})\\
+&=\ln(\theta)+\ln(e^{-\theta Y_1})+\ldots+\ln(\theta)+\ln(e^{-\theta Y_n})\\
+&=n\cdot \ln(\theta)+(-\theta Y_1 +\ldots+ (-\theta Y_n))\\
+&=n \ln(\theta) -\theta \sum Y_i
+\end{align*}
+
+If I make another R function for the log of the likelihood function, what
+would it look like as I varied $\theta$? Why would I use the log of the
+likelihood function versus the likelihood function itself directly? (Although
+the math of the logged version certainly looks simpler). It almost looks as if
+it would be \emph{sufficient} to have $n$ and the total durations to calculate
+values of the log-likelihood function and that we wouldn't need the raw data
+at all. Is this right? Is this what people mean by "sufficient statistic"? How
+is this useful?
+
+
+> Answer
+The log of the likelihood function simplifies calculations by converting multiplication into addition. For probabilities, which involve decimal values, repeated multiplication can be cumbersome and reduces readability. Additionally, the maximum of the likelihood function and the log-likelihood function are the same. This is because the logarithm is a monotonic increasing function, meaning that as the input increases, the output also increases, and as the input decreases, the output decreases. Therefore, when calculating the MLE (Maximum Likelihood Estimate) of theta, using the log of the likelihood produces the same result.
+
+Now, most people don't seem to graph curves or surfaces of their likelihood
+functions (logged or otherwise). But I know that there is something special
+about the maximum of the log likelihood function (or perhaps the minimum of the
+negative log likelihood function). What is it? How would I find the maximum of
+the log likelihood function (i.e. is there a general formula for $\theta$ where
+the log likelihood function here takes on its maximum value?)?^[She confesses
+that she doesn't remember too much calculus so she used Wolfram Alpha online to
+do: `Solve[D[ n * Log[t] - t * y, t]==0,t]`. Or use Sage
+<http://www.sagemath.org/> or <https://cloud.sagemath.com>  to do something similar. ]
+
+So, we can find the maximum by just graphing the curve, or by using calculus.
+Another way is to find the maximum numerically doing something like:
+
+```{r}
+## The log likelihood function. Something is causing an error here. How to fix it?
+Log.L.exp.fn <- function(theta, y = cr.df$duration) { ## Theta can be a vector
+  n <- length(y)
+  sumy <- sum(y)
+  if (any(theta <= 0)) {
+    ## This makes values for theta less than or equal to zero really not near the maximum
+    return(-99999)
+  } else {
+    return(n * log(theta) - theta * sumy)
+    ##return(sum(dexp(cr.df$duration,rate=theta,log=TRUE)))
+    ## return(sum(log(dexp(y, rate = theta, log = FALSE))))
+  }
+}
+
+
+## What is this doing?
+##optim(par, fn, gr = NULL, ...,
+  #    method = c("Nelder-Mead", "BFGS", "CG", "L-BFGS-B", "SANN",
+  #               "Brent"),
+  #   lower = -Inf, upper = Inf,
+  #    control = list(), hessian = FALSE)
+
+# optimHess(par, fn, gr = NULL, ..., control = list())##
+
+
+themle.max <- optim(
+  par = c(theta = 1),
+  fn = Log.L.exp.fn, 
+  control = list(fnscale = -1, trace = 2), 
+  method = "BFGS", 
+  hessian = TRUE
+)
+
+themle.max
+
+## Maybe look at the output?
+## themle.max
+```
+>Answer
+θ=0.02489 represents the rate parameter of the exponential distribution, where smaller values indicate longer intervals. The mean is given by 1/𝜃, which equals approximately 1/0.02489 = 40.17 
+The log-likelihood value is −192.4, which reflects the model fit but does not hold intrinsic meaning on its own; instead, it facilitates relative comparisons between models.
+
+
+```{r}
+log.L.exp.fn <- function(theta, y = cr.df$duration) {
+  log(prod(theta * exp(-theta * y)))
+}
+
+
+
+
+```
+
+Do all the methods agree?
+
+> Answer
+We can correct the equation by using the properties of logarithmic functions like this
+log.L.exp.fn <- function(theta, y = cr.df$duration) {
+  sum(log(theta) + (-theta * y))
+}
+
+
+
+
+It is cool, of course, that we have generated an estimator (i.e. we came up
+with a formula to make a good guess (?how good? ?how would we know?) about
+something unobserved that we care about) using only statements about the kind
+of probability machine or data generating process that we think could produce
+the outcome. But, what about statistical inference? We need a sampling
+distribution. Where would this come from? Someone mentioned "use the CLT"? What
+would that mean? It seems like they just want me to claim that this maximum
+likelihood estimator produces estimates that are like means or sums of
+independent observations and that thus we know that the sampling distribution
+will be Normal. Is this right?  If so, then how would I know something about
+the spread or center of this Normal distribution? Is this estimator unbiased?
+If not, what are its properties such that I can know which Normal distribution
+to use for statistical inference."
+
+Even if I thought that the center of the distribution of $\hat{\theta}$ is
+somehow centered on $\theta$, I am wondering about how to represent the idea
+that a larger sample is more information (and that thus a larger sample should
+have a narrower Normal distribution and shorter confidence intervals).
+
+> Answer
+  Your question touches on the core of MLE and statistical inference. It can be summarized into three main points:
+First, it concerns the accuracy of the MLE estimate derived from the likelihood function. Second, it addresses how to construct a sampling distribution for statistical inference, given that such a distribution is essential. Finally, it raises concerns about whether the Central Limit Theorem (CLT) can be applied in this case. 
+  First, the accuracy of the MLE estimator can be evaluated based on two key criteria: unbiasedness and efficiency. In terms of unbiasedness, MLE becomes asymptotically unbiased as the sample size increases, allowing the estimator to converge to the population parameter. Regarding efficiency, MLE is often asymptotically efficient, meaning it is likely to achieve minimum variance unbiased estimation (MVUE), especially as the sample size grows larger. Second, the sampling distribution of the estimator ^θ is the distribution formed by MLE estimates calculated from multiple samples. This distribution indicates how the estimator is spread around the true parameter in a specific sample. To compute the sampling distribution of MLE, the asymptotic property of the estimator is typically used. When the sample size is sufficiently large, the Central Limit Theorem (CLT) implies that the sampling distribution of the MLE estimator can be approximated by a normal distribution. Finally, the application of the CLT requires the assumptions of i.i.d. (independent and identically distributed data) and a sufficiently large sample size (𝑛).
+
+
+
+
+One thing that I played around with is the following:
+
+Look at the following four log-likelihood functions with the same maximum of
+$\hat{\theta}=.025$. The vertical black line is at the mle estimate. The gray
+horizontal lines are at the maximum of each likelihood function. How does this
+next change the amount of information available for the estimator?
+
+```{r morellfns}
+## Remembering    that the log likelihood is n * log(theta) - theta * sumy
+Log.L.exp.n10.fn <- function(theta = x) {
+  10 * log(theta) - theta * 400
+}
+Log.L.exp.n20.fn <- function(theta = x) {
+  20 * log(theta) - theta * 800
+}
+Log.L.exp.n41.fn <- function(theta = x) {
+  41 * log(theta) - theta * 1640
+}
+Log.L.exp.n100.fn <- function(theta = x) {
+  100 * log(theta) - theta * 4000
+}
+
+proposed.thetas <- seq(.01, .06)
+
+## Setup the y-axis range so all three likelihood functions can go on the same plot.
+yrange <- range(
+  Log.L.exp.n10.fn(theta = proposed.thetas),
+  Log.L.exp.n20.fn(theta = proposed.thetas),
+  Log.L.exp.n41.fn(theta = proposed.thetas),
+  Log.L.exp.n100.fn(theta = proposed.thetas)
+)
+```
+
+
+```{r moreloglikplots,fig.width=4,fig.height=4,out.width='.6\\textwidth'}
+par(mfrow = c(1, 1))
+curve(Log.L.exp.n100.fn(theta = x),
+  from = .01, to = .06, ylim = yrange, ylab = "Log-Likelihood",
+  xlab = expression(theta)
+)
+curve(Log.L.exp.n41.fn(theta = x), from = .01, to = .06, ylim = yrange, add = TRUE, col = "green")
+curve(Log.L.exp.n20.fn(theta = x), from = .01, to = .06, ylim = yrange, add = TRUE, col = "blue")
+curve(Log.L.exp.n10.fn(theta = x), from = .01, to = .06, ylim = yrange, add = TRUE, col = "red")
+abline(v = c(.025, .02), col = c("black", "gray"))
+abline(
+  h = c(
+    Log.L.exp.n100.fn(theta = .025),
+    Log.L.exp.n41.fn(theta = .025),
+    Log.L.exp.n20.fn(theta = .025),
+    Log.L.exp.n10.fn(theta = .025)
+  ),
+  col = "gray"
+)
+
+text(
+  rep(.05, 4),
+  c(
+    Log.L.exp.n100.fn(theta = .05),
+    Log.L.exp.n41.fn(theta = .05),
+    Log.L.exp.n20.fn(theta = .05),
+    Log.L.exp.n10.fn(theta = .05)
+  ),
+  c("n=100", "n=41", "n=20", "n=10")
+)
+```
+
+If you took a proposed $\theta=.025$ and another value close by, like
+.02 (shown by the vertical gray line), and you subtracted the value of
+the likelihood function at .025 from the value at .02 or .01, which
+likelihood function would produce the largest difference? What aspects of the
+curves seem to capture the idea of "information"?
+
+```{r }
+## The log likelihood functions evaluated at the maximum
+themle <- c(
+  n100 = Log.L.exp.n100.fn(theta = .025),
+  n41 = Log.L.exp.n41.fn(theta = .025),
+  n20 = Log.L.exp.n20.fn(theta = .025),
+  n10 = Log.L.exp.n10.fn(theta = .025)
+)
+
+## The log likelihood functions evaluated close to the maximum
+notmlebutclose <- c(
+  Log.L.exp.n100.fn(theta = .02),
+  Log.L.exp.n41.fn(theta = .02),
+  Log.L.exp.n20.fn(theta = .02),
+  Log.L.exp.n10.fn(theta = .02)
+)
+
+themle - notmlebutclose ## The difference in log likelihood.
+```
+
+> Explanation
+This code is designed to evaluate how well the estimated 𝜃 value from MLE explains the data. Specifically, it compares the log-likelihood values at 𝜃= 0.02 and 𝜃= 0.025 to assess the sensitivity of the likelihood function. The steepness of the likelihood curve indicates that there is more information around the estimate. As shown in the results, as 𝑛increases, the likelihood function becomes steeper, indicating that the amount of information contained in the estimate also increases.
+
+I want some measure of the curve in the likelihood around the maximum. What is
+this "hessian" thing that I've seen people talk about online? How can it help
+us here?
+
+>Answer
+  The instantaneous rate of change on a curve can be determined using differentiation. The Hessian, as the second derivative matrix of a function, provides information about the function's curvature.    
+
+I know that a confidence interval can be constructed from a standard error. Can
+you make one here? Given the data in hand? What does this confidence interval
+mean?
+>Answer
+  The basic principle of confidence intervals is to calculate the range within a specific confidence level using the standard deviation. The standard error can be computed from the Hessian. This is possible because the Hessian represents the curvature of the function. Curvature measures how quickly the function changes around a specific value, which is directly linked to the uncertainty of the estimate.
+
+So, what have we done? We have an estimate and a confidence interval. But what
+do they mean? It seems as if the answer has to do not with repeated sampling
+from some population or repeated assigning of some treatment, but with the
+"population" referring to all the ways that the
+outcome-value-generating-machine could produce the values (here the machine is
+an exponential machine --- we plug in some values and it produces other values,
+but the machine is stochastic, it is a probability density function). How can I
+understand what is going on here? It is clearly very cool that if I can
+articulate a dgp and also say how the individual dgp's go together (here they
+are all independent and the same and so I just multiple them), then I can write
+a likelihood function, and have a useful estimate of a parameter be the value
+of the parameter at the maximum of the function AND the standard error arising
+from the curvature of the function at the maximum. I'm just wondering how to
+communicate about this approach with my bosses. Thanks much for your help!"
+
+>Answer
+  If we consider the basic principle of differentiation, we can intuitively understand why the Hessian can be used to calculate the standard error. Differentiation is fundamentally a tool for measuring rates of change. It tells us how quickly something is changing or, at a specific moment, how steeply it is increasing or decreasing. In essence, it is a concept related to the rate of change.
+  Let’s use the example of a steep mountain versus a gentle hill. If a mountain is steep (i.e., high curvature), even a small step away from the peak (MLE) results in a significant drop in altitude (likelihood). This implies that the area near the peak is well-defined and stable (high confidence). In this case, the standard error is small. On the other hand, if the hill is gentle (i.e., low curvature), the altitude changes slowly even as you move far from the peak. This indicates that the area near the peak is uncertain and ambiguous. In this case, the standard error is large.
+  This principle is the same as what we observed earlier when comparing the difference in log-likelihood values between 𝜃=0.02 and 𝜃= 0.025, which reflects the amount of information and the confidence in the estimate.
+
+
+## Covariates
+
+"Someone then says, 'Explanatory variables like interventions as well as
+covariates can be used in MLE by parameterizing your likelihood function.'
+Again, I found this puzzling. So, I asked for code. But the code they sent was
+difficult for me to understand. Can you explain how what is going on is
+'parameterizing' a likelihood function and how it works to enable us to 'use'
+covariates and explanatory variables to learn about relationships? What are we
+learning about when we do this anyway? Can you interpret the code and the results below?"
+
+DURAT is duration in months. CRISIS is duration of preceding crisis (or
+difficulty in forming the given cabinet) in days. NUMST2 is numerical status
+of cabinet 1-majority, 0-else. ITALY is a dummy for italy.\footnote{See
+\url{https://www.dropbox.com/s/nyjbqy71ywv17uc/coalcold.zip} for the actual
+replication files from ICPSR study number 1115.}
+
+DURAT
+CRISIS
+NUMST2
+
+>Answer
+Parameterizing the likelihood function involves constructing it using explanatory variables (CRISIS, NUMST2) and covariates to estimate the coefficients (𝜃) for each variable. This allows us to understand the effects of explanatory variables on the outcome variable. As shown in the results, NUMST2 (𝜃^= −0.3414) indicates that majority cabinets tend to have shorter durations, and ITALY (𝜃^= −0.6592) suggests that Italian cabinets have significantly shorter durations. In summary, this code parameterizes the Poisson likelihood function to estimate the coefficients for each variable, calculates confidence intervals, and identifies the impact of each variable on the dependent variable.
+
+
+```{r parameterizedlikelihood}
+load(url("http://www.jakebowers.org/PS531Data/cabinet-data.rda"))
+
+## x-1 means maj=0 and else=1, 1-(x-1) means maj=1 else=0
+cabdata$numstatus <- 1 - (cabdata$NUMST2 - 1)
+
+## No fractional durations. Count number of weeks.
+cabdata$durnew <- ifelse(cabdata$DURAT < 1, 0, cabdata$DURAT)
+
+themf <- model.frame(durnew ~ CRISIS + numstatus + ITALY, data = cabdata)
+X <- model.matrix(durnew ~ CRISIS + numstatus + ITALY, data = themf)
+y <- model.response(themf)
+
+## Modeling *number of days* or *count* of days.
+pois_log_lik <- function(theta, y, X) {
+  ## What is this next line doing? Can you write other code to do the same thing?
+  mu <- X %*% theta
+  if (any(mu <= 0)) {
+    ## mu cannot be less than 0
+    return(-99999)
+  }
+  ll <- sum(dpois(t(y), lambda = exp(mu), log = TRUE))
+  # ll <- sum(log(dpois(t(y), lambda =  exp(mu), log = FALSE)))
+  ll
+}
+
+args(pois_log_lik)
+
+
+starting_values1 <- c(1 / mean(cabdata$durnew), .01, .01, .01)
+names(starting_values1) <- colnames(X)
+starting_values2 <- c(0, 0, 0, 0)
+names(starting_values2) <- colnames(X)
+## Testing the functions
+pois_log_lik(theta = starting_values1, y = y, X = X)
+pois_log_lik(theta = starting_values2, y = y, X = X)
+pois_log_lik(theta = starting_values2 + .01, y = y, X = X)
+
+themle_pois <- optim(
+  par = starting_values1, y = y, X = X, fn = pois_log_lik, hessian = TRUE, method = "BFGS",
+  control = list(fnscale = -1, trace = TRUE)
+)
+themleses_pois <- sqrt(diag(solve(-1 * themle_pois$hessian[1:4, 1:4])))
+themlecoefs_pois <- cbind(
+  mlebhat = themle_pois$par[1:4],
+  mlesehat = themleses_pois[1:4]
+)
+
+## How sensitive are these results to starting values?
+themle_pois2 <- optim(
+  par = c(1, 0, 0, 0), y = y, X = X, fn = pois_log_lik, hessian = TRUE, method = "BFGS",
+  control = list(fnscale = -1, trace = TRUE)
+)
+themle_pois3 <- optim(
+  par = c(.1, 1, 1, 1), y = y, X = X, fn = pois_log_lik, hessian = TRUE, method = "BFGS",
+  control = list(fnscale = -1, trace = TRUE)
+)
+themle_pois$par
+themle_pois2$par
+themle_pois3$par
+
+## hmmm.... fitdistrplus ?? https://cran.r-project.org/web/packages/fitdistrplus/vignettes/paper2JSS.pdf
+## https://github.com/petrkeil/Statistics/blob/master/Lecture%203%20-%20poisson_regression/poisson_regression.Rmd
+glm1 <- glm(durnew ~ CRISIS + numstatus + ITALY, family = poisson(link = "log"), data = cabdata)
+vglm1 <- vglm(durnew ~ CRISIS + numstatus + ITALY, poissonff(link = "loglink"), data = cabdata)
+confint(glm1)
+confintvglm(vglm1)
+confintvglm(vglm1, method = "profile", trace = TRUE)
+## Compare the different approaches
+### Our own version done by hand
+themlecoefs_pois
+## And the versions from the pre-made R packages
+summary(glm1)$coef[, 1:2]
+summary(vglm1)@coef3[, 1:2]
+```
+
+
+## Extra: OLS is MLE
+
+Here you can see that OLS is MLE too if you refer to the Mathematica output for
+the algebra and calculus.
+
+```{r}
+## Set intercept to 0
+cabdata$crisis_md <- with(cabdata, CRISIS - mean(CRISIS))
+cabdata$durnew_md <- with(cabdata, durnew - mean(durnew))
+lm1 <- lm(durnew ~ CRISIS, data = cabdata)
+coef(lm1)
+lm2 <- lm(durnew_md ~ crisis_md, data = cabdata)
+coef(lm2)[2]
+coef(lm2)[1]
+
+residuals1 <- residuals(lm1)
+qqnorm(residuals1)
+shapiro.test(residuals1)
+
+## See the Mathematica result:
+b1 <- with(cabdata, sum(durnew_md * crisis_md) / sum(crisis_md^2))
+b1
+## Alternatively
+with(cabdata, cov(durnew_md, crisis_md) / var(crisis_md))
+```
+> explanation
+In simple linear regression, if the **residuals** are assumed to follow a normal distribution and are independently distributed, the regression coefficients calculated using OLS and those estimated using MLE will provide mathematically identical values. However, when analyzing the residual plot and the p-value of the Shapiro-Wilk test, the W statistic of 0.9 suggests that such a value is statistically rare, allowing us to reject the null hypothesis and accept the alternative hypothesis. Therefore, since the residuals do not follow a normal distribution, the two methods yield different results.
+
+
+# References
