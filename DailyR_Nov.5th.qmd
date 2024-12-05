@@ -1,0 +1,412 @@
+---
+title: 'Exploration 12: Maximum Likelihood --- Working with parameterized likelihood functions'
+author: 'Jake Bowers'
+date: '`r format(Sys.Date(), "%B %d, %Y")`'
+format:
+  html:
+    code-fold: true
+  pdf:
+    number-sections: true
+    colorlinks: true
+    cite-method: biblatex
+    keep-tex: true
+    monofontoptions: "Scale=0.7"
+    include-in-header:
+      text: |
+        \usepackage{bm}
+        \usepackage{tikz}
+        \usepackage{tikz-cd}
+        \usetikzlibrary{arrows,automata,positioning,trees,decorations.markings}
+        \usepackage{tikz-qtree}
+        \usepackage{amsmath, booktabs, caption, longtable,listings,fancyvrb,fvextra}
+        \DeclareOldFontCommand{\bf}{\normalfont\bfseries}{\mathbf}
+fontsize: 10pt
+geometry: margin=1in
+graphics: yes
+bibliography: classbib.bib
+biblio-style: "authoryear-comp,natbib"
+---
+
+\input{mytexsymbols}
+
+```{r setup, echo=FALSE, results=FALSE, include=FALSE, cache=FALSE}
+library(here)
+library(VGAM)
+library(pscl)
+library(MASS)
+library(glmx)
+library(gld)
+library(tidyverse)
+library(mvtnorm)
+library(numDeriv)
+library(optimx)
+library(subplex)
+library(bayesplot)
+# library(optimr)
+```
+
+
+```{r loaddata}
+load(url("http://jakebowers.org/Data/wartreatydeath.rda"))
+wtd <- wartreatydeath ## shorten name
+rm(wartreatydeath)
+```
+
+
+@valentino2006covenants want to learn about the relationship between signing
+human rights treaties and the outcomes of civil wars. The data contains all
+interstate wars from 1900 to 2003. The outcome (`ncdead`) is number of
+civilians intentionally killed by one side or another of a war (the rows in the
+dataset are the sides in the war, usually two sides). The key explanatory
+variable (`treaty`) records whether the side ratified an international treaty
+about the protection of civilians (the Hague Convention of 1899 and 1907, or
+the Geneva Convention of 1949). Here are two versions of their outcome variable
+(one recoded to measure any deaths versus some and the other as a count).^[See
+also
+<https://dataverse.harvard.edu/dataset.xhtml?persistentId=doi:10.7910/DVN/JGE9OF>]
+
+```{r}
+## plot(density(wtd$ncdead))
+wtd$ncdead <- wtd$noncomdead
+quantile(wtd$ncdead, seq(0, 1, .1))
+## Make the continuous outcome an integer rather than a possibly decimal count per population
+wtd$ncdead <- round(wtd$ncdead)
+## Look at the outcome a bit
+quantile(wtd$ncdead, seq(0, 1, .1))
+wtd$ncdead01 <- as.numeric(wtd$ncdead > 0)
+table(wtd$ncdead01)
+mean(wtd$ncdead01)
+```
+
+Notice how the data is organized. This should inform your interpretations below:
+
+```{r}
+wtd %>%
+  dplyr::select(warnumber, participants, names, duration, ncdead, treaty) %>%
+  head()
+```
+
+ 1. Imagine that we wanted to learn about the role of treaty signing in a model
+    of non-combatant deaths. What data generating process or probability model
+    might you use? Some might propose a poisson model and others a negative
+    binomial model. Others might imagine that a Gaussian model might be
+    sufficient. Here is a Gaussian likelihood model and results. Please explain
+    the code and interpret the results in substantive terms: for example, you
+    will not only want to interpret the coefficients but also to produce
+    predicted or fitted values and see whether they make sense. Please also
+    check these results using a built-in R routine that does Gaussian model
+    maximimum likelihood estimation within R like `glm` or `vglm`. Also check these results using the `lm` command.  (See below for those models if you are having trouble.) If you find discrepancies please speculate about why they might exist. You might want to try other optimization methods or starting values, for example.
+
+```{r}
+#' A Gaussian or Normal Log-likelihood function
+#'
+#' A function to calculate the log-likeligood built on an IID Normal aka
+#' Gaussian DGP parameterized by the columns of X
+#' @param theta is a vector of parameters must be length same as number of columns of X
+#' @param y is a vector outcome
+#' @param X is a matrix containing terms that might change the values of theta.
+#' @return A scalar value, the log-likelihood given y, X, and theta
+gaussian_lL_identity <- function(theta, y, X) {
+  ## There are two parameters in a gaussian distribution: the mean, or center
+  ## (often called mu), and the spread or variance or width (often called
+  ## sigma)
+  thebetas <- theta[1:ncol(X)]
+  thesigma2 <- theta[ncol(X) + 1]
+  ## next parameterizes the mu parameter using the columns of X
+  mu <- X %*% thebetas
+  the_n <- length(y)
+  ## An IID variance-covariance matrix
+  ## assuming thesigma2 is the sd rather than var
+  thesigmamat <- thesigma2^2 * diag(the_n)
+  ## notice that mu is length of thebetas so our variance-covariance matrix is
+  ## length(thebetas) by length(thebetas).
+  ll <- -dmvnorm(t(y), mu, thesigmamat, log = TRUE)
+  ll
+}
+
+summary(wtd[, c("ncdead", "treaty", "duration")])
+wtd$duration_md <- with(wtd, (duration / 365 - mean(duration / 365)))
+wtd$duration_rank <- rank(wtd$duration)
+stopifnot(cor(wtd$duration_md, wtd$duration) == 1)
+
+## Test the likelihood function
+X <- model.matrix(~ treaty + duration_rank, data = wtd)
+y <- wtd$ncdead
+
+starting_values_dat <- wtd %>% summarize(
+  "(Intercept)" = mean(ncdead[treaty == 0]),
+  "treaty" = mean(ncdead[treaty == 1]) - mean(ncdead[treaty == 0]),
+  "duration_rank" = mean(ncdead[duration_rank < mean(duration_rank)]) - mean(ncdead[duration_rank >= mean(duration_rank)]),
+  "sigma2" = sd(y)
+)
+starting_values <- unlist(starting_values_dat)
+starting_values
+
+## hmm... https://diffuseprior.wordpress.com/2012/05/28/optim-youre-doing-it-wrong/
+ starting_values <- c(0, 0, 0, 1)
+## starting_values <- c(10, 100, 1000, 1)
+## Testing the log likelihood function
+ gaussian_lL_identity(theta = starting_values, y = y, X = X)
+ starting_values <- c(10, 100, 1000, 1)
+ gaussian_lL_identity(theta = starting_values, y = y, X = X)
+## starting_values <- c(coef(blah),var(residuals(blah)))
+
+ 
+########### 
+mle1 <- optim(
+  par = starting_values, y = y, X = X, fn = gaussian_lL_identity,
+  hessian = FALSE, method = "Nelder-Mead",
+  control = list(trace = TRUE, maxit = 100, parscale = c(1, 1, 1, 10))
+)
+mle1_b <- mle1$par
+mle1_b
+
+mle1_hess <- numDeriv::hessian(gaussian_lL_identity, x = mle1_b, X = X, y = y)
+mle1_se <- sqrt(diag(solve(mle1_hess)))
+
+gaussian_lL_identity_opt_fn <- function(theta) {
+  gaussian_lL_identity(theta, y = y, X = X)
+}
+
+## Try a lot of different optimization algorithmns
+
+mle3 <- opm(
+  par = starting_values,
+  fn = gaussian_lL_identity_opt_fn,
+  method = "ALL",
+  hessian = TRUE,
+  control = list(
+    trace = 1, maxit = 1000, maxfeval = 5000,
+    parscale = c(1, 1, 1, 10)
+  )
+)
+## What do we see here?
+mle3
+mle3_good <- mle3 %>% filter(!is.na(treaty) & convergence == 0)
+mle3_min <- mle3_good %>% filter(value == min(value))
+mle3_b <- mle3_min[, c("(Intercept)", "treaty", "duration_rank")]
+mle3_hess <- attr(mle3, "details")[, "nhatend"][[row.names(mle3_b)]]
+mle3_se <- sqrt(diag(solve(mle3_hess)))
+
+cbind(b = t(mle3_b), se = mle3_se[1:3])
+## Hmm... different optimizers are giving different results!
+cbind(b = mle1_b[1:3], se = mle1_se[1:3])
+
+
+set.seed(1234)
+wtd$fakey <- rnorm(nrow(X), mean = mean(y), sd = sd(y))
+y <- wtd$fakey
+ blah1 <- glm(fakey ~ treaty + duration_rank, data = wtd)
+ blah2 <- lm(fakey ~ treaty + duration_rank, data = wtd)
+
+ blah1;blah2
+
+
+ 
+ 
+
+```
+>Answer
+Comparing the presented models, all three show different results for the intercept, `treaty`, and `duration_rank` variables. The first and second Gaussian models (`mle3`, `mle1`) were estimated using custom functions, while `glm()` and `lm()` used OLS.
+  The first Gaussian model mle3 showed a large negative intercept of `-194,213` with a very high standard error of `126,211`, indicating low reliability of the model. The second model (mle1) had a positive intercept of `231,992`, but the standard error of `140,016` still indicated considerable uncertainty. glm and lm showed a relatively smaller negative intercept of `-60,658`, which is still unrealistic. These discrepancies might arise from differences in initial values and optimization paths.
+  There were also significant differences in the `treaty` variable. In the first model mle3, it showed a positive value of `93,124`, while the second model mle1 showed a negative value of `-128,017`. In contrast, glm and lm predicted `121,889`, similar to the first model. These differences likely stem from the choice of initial values and optimization algorithms. Particularly in nonlinear optimization, incorrect initial values can lead to convergence at local optima, resulting in inaccurate results.
+  For the `duration_rank` variable, all models predicted positive coefficients, indicating that an increase in duration rank leads to an increase in the number of deaths. However, the magnitude of the coefficients varied: `mle3` was the highest at `3,356`, mle1 at `783`, and glm and lm at `453`. The standard errors were relatively low, indicating trustworthiness, but differences among the models still existed.
+  The discrepancies between the three models can arise from differences in initial values and optimization methods. glm and lm use OLS while custom functions use MLE leading to differences. Additionally, since non-combatant death counts are non-negative integer data, a Poisson or Negative Binomial model might be more appropriate than a Gaussian model.
+  In conclusion, the three models estimate the effects of treaty and duration_rank differently, and these differences can stem from the optimization method and initial value settings. Particularly for the treaty variable, its effect varies greatly in sign and magnitude across models, necessitating caution in interpretation.
+
+
+
+
+
+
+ 2. Now here are a series of different models of counts of deaths. At least
+    some people would claim that one of these models is "most appropriate" for
+    count data like these. Since there are so many choices, it seems reasonable
+    for you to practice making some of these choices.  Please interpret the
+    coefficients in the following models. Which one (or ones) would you use to
+    most clearly describe the relationship between treaty signing and
+    non-combatant deaths? Do not talk about standard errors, $p$-values, or
+    confidence intervals or statistical significance. You should focus on the
+    substantive relationship described by the models. You can produce predicted
+    values if that helps: how, say, the number of deaths varies depending on
+    treaty signing.  You can also talk about the "fit" of the model (using,
+    say, AIC or BIC or by plotting simulated predictions (often called
+    "posterior predictions" in the Bayesian literature) against observed
+    outcomes).  Explain your choice by comparing your chosen model or models to
+    the others.  Feel free to propose something different as well: for example,
+    you could use `DeclareDesign` to check for bias  in the estimators or the
+    coverage/false positive rates of the resulting tests.
+
+
+```{r models_of_counts}
+cont_mod0 <- lm(I(rank(ncdead)) ~ treaty + duration_md, data = wtd)
+cont_mod1 <- lm(ncdead ~ treaty + duration_md, data = wtd)
+cont_mod2 <- glm(ncdead ~ treaty + duration_md, data = wtd)
+cont_mod3 <- glm(ncdead ~ treaty + duration_md, data = wtd, family = poisson)
+cont_mod4 <- vglm(ncdead ~ treaty + duration_md, data = wtd, family = poissonff)
+cont_mod5 <- glmx(ncdead ~ treaty + duration_md, data = wtd, family = negative.binomial)
+cont_mod6 <- glm.nb(ncdead ~ treaty + duration_md, data = wtd)
+cont_mod7 <- glm.nb(ncdead ~ treaty + duration_md, data = wtd, link = sqrt)
+cont_mod8 <- zeroinfl(ncdead ~ treaty + duration_md, data = wtd)
+cont_mod9 <- vglm(ncdead ~ treaty + duration_md, data = wtd, family = negbinomial)
+```
+
+Here are some approaches you might try to compare the models. Feel free to come up with your own approaches here, too.
+
+```{r}
+c_mods <- ls(patt = "cont_mod")
+sapply(c_mods, function(objnm) {
+  coef(get(objnm))
+})
+
+## What is happening here?
+preddat <- expand.grid(treaty = c(0, 1), duration_md = mean(wtd$duration_md))
+preddat$cont_mod1 <- predict(cont_mod1, newdata = preddat, type = "response")
+preddat$cont_mod2 <- predict(cont_mod2, newdata = preddat, type = "response")
+preddat$cont_mod3 <- predict(cont_mod3, newdata = preddat, type = "response")
+preddat$cont_mod4 <- predict(cont_mod4, newdata = preddat, type = "response")
+preddat$cont_mod5 <- predict(cont_mod5, newdata = preddat, type = "response")
+preddat$cont_mod6 <- predict(cont_mod6, newdata = preddat, type = "response")
+preddat$cont_mod7 <- predict(cont_mod7, newdata = preddat, type = "response")
+preddat$cont_mod8 <- predict(cont_mod8, newdata = preddat, type = "response")
+preddat$cont_mod9 <- predict(cont_mod9, newdata = preddat, type = "response")
+
+preddat[preddat$treaty == 1, ] - preddat[preddat$treaty == 0, ]
+
+c_info_crit <- sapply(c_mods, function(objnm) {
+  c(AIC = AIC(get(objnm)), BIC = BIC(get(objnm)))
+})
+c_info_crit
+
+apply(c_info_crit, 1, which.min)
+which.min(c_info_crit["AIC", ])
+which.min(c_info_crit["BIC", ])
+
+simulated_predictions <- lapply(c_mods[-c(6, 9)], function(objnm) {
+  as.matrix(stats::simulate(get(objnm), 1000, seed = 12345))
+})
+names(simulated_predictions) <- c_mods[-c(6, 9)]
+
+## Notice the rough ability of the predictions to match the observed data
+summary(wtd$ncdead)
+## Hmm.. what do these ranges mean?
+sapply(simulated_predictions, range)
+
+## Graphical comparisons of the simulated responses using the different models
+## and the actual data.
+## https://cran.r-project.org/web/packages/bayesplot/vignettes/graphical-ppcs.html
+library(bayesplot)
+ppc_dens_overlay(y = wtd$ncdead, yrep = t(simulated_predictions[[3]]))
+```
+>Answer
+  The provided code analyzes ncdead using ten different models, each employing various approaches such as linear regression, Poisson, negative binomial, and zero-inflated models to assess the impact of treaties treaty.The model with the lowest AIC and BIC scores is cont_mod0, which uses lm to predict rank(ncdead)). While this model is relatively simple and explains the data well, it may exhibit high variance with data that includes extreme values and rare events, suggesting that a negative binomial model might be more appropriate.
+  Simulation results indicate that most observations are concentrated around zero, which suggests that the models currently used do not sufficiently explain the actual data. Reflecting this characteristic, zero-inflated or negative binomial models could be more suitable alternatives.
+  The relationship between the treaty variable and non-combatant death counts varies across models. For example, cont_mod1 and cont_mod2 predict an increase in deaths with treaty signing, while cont_mod6 and cont_mod9 show a decreasing trend. These differences arise from the assumptions and distributions specific to each model. Linear regression is based on means and variances, but Poisson and negative binomial models are designed to fit non-negative integer data better, resulting in different predictions based on data characteristics.
+  In conclusion, although cont_mod0 recorded low AIC and BIC, considering the overdispersion in the data, negative binomial models (cont_mod6, cont_mod9) may provide better results. Given the characteristics and distribution of the data, using zero-inflated or negative binomial models would likely be more appropriate.
+
+
+
+ 3. One way to handle such skewed data is to simplify the question: here I have
+    recoded the outcome variable to be a binary variable. Here a set of
+    approaches to binary outcomes.  Please interpret the coefficients in the
+    following models. Which one (or ones) would you use to most clearly
+    describe the relationship between treaty signing and non-combatant deaths?
+    Do not talk about standard errors, $p$-values, or confidence intervals or
+    statistical significance. You should focus on the substantive relationship
+    described by the models. You can produce predicted values if that helps.
+    You can also talk about the "fit" of the model (using, say, AIC or BIC).
+    Explain your choice by comparing your chosen model or models to the others.
+    Feel free to propose something different as well as above. For example, you
+    can check out the help page for `glmx::plinks` if you want to explore yet
+    more link functions for binary outcomes.
+
+```{r}
+bin_mod1 <- lm(ncdead01 ~ treaty + duration_md, data = wtd)
+bin_mod2 <- glm(ncdead01 ~ treaty + duration_md, data = wtd)
+bin_mod3 <- glm(ncdead01 ~ treaty + duration_md, family = binomial(link = logit), data = wtd)
+yhats <- coef(bin_mod3)[1] + coef(bin_mod3)[2] * c(0, 1) + coef(bin_mod3)[3] * mean(wtd$duration_md)
+bin_mod4 <- glm(ncdead01 ~ treaty + duration_md, family = binomial(link = probit), data = wtd)
+bin_mod5 <- glm(ncdead01 ~ treaty + duration_md, family = binomial(link = cauchit), data = wtd)
+bin_mod6 <- glm(ncdead01 ~ treaty + duration_md, family = binomial(link = cloglog), data = wtd)
+gossbin <- function(nu) binomial(link = gosset(nu))
+bin_mod7 <- glmx(ncdead01 ~ treaty + duration_md, data = wtd, family = gossbin, xstart = 0, xlink = "log")
+pregibin <- function(shape) binomial(link = pregibon(shape[1], shape[2]))
+bin_mod8 <- glmx(ncdead01 ~ treaty + duration_md,
+  data = wtd, family = pregibin, xstart = c(1, 0), xlink = "identity",
+  start = coef(bin_mod1)
+)
+```
+
+```{r}
+preddat$mod1 <- predict(bin_mod1, newdata = preddat, type = "response")
+preddat$mod2 <- predict(bin_mod2, newdata = preddat, type = "response")
+preddat$mod3 <- predict(bin_mod3, newdata = preddat, type = "response")
+preddat$mod4 <- predict(bin_mod4, newdata = preddat, type = "response")
+preddat$mod5 <- predict(bin_mod5, newdata = preddat, type = "response")
+preddat$mod6 <- predict(bin_mod6, newdata = preddat, type = "response")
+preddat$mod7 <- predict(bin_mod7, newdata = preddat, type = "response")
+preddat$mod8 <- predict(bin_mod8, newdata = preddat, type = "response")
+
+preddat[preddat$treaty == 1, paste0("mod", 1:8)] - preddat[preddat$treaty == 0, paste0("mod", 1:8)]
+
+b_mods <- ls(patt = "bin_mod")
+
+b_info_crit <- sapply(b_mods, function(objnm) {
+  c(AIC = AIC(get(objnm)), BIC = BIC(get(objnm)))
+})
+b_info_crit
+
+apply(b_info_crit, 1, which.min)
+```
+
+>Answer
+  Using various binary regression models to analyze the impact of treaty signing on non-combatant deaths, each model explains the substantive relationship differently.
+  **bin_mod1 (Linear regression)** assumes a linear relationship between the DV (ncdead01) and IV (treaty, duration_md). Using linear regression for a binary outcome variable is limited but allows intuitive interpretation. If the coefficient for treaty is positive, it can be interpreted as an increase in the probability of non-combatant deaths due to treaty signing.
+  **bin_mod3 (Logistic regression, logit link function)** evaluates the effect of treaty on the odds ratio of non-combatant deaths. If the coefficient for treaty is positive, it implies that treaty signing increases the likelihood of death. Logistic regression is suitable for modeling the probability of binary variables.
+  **bin_mod4 (Probit link function)** explains the impact of treaty based on a normal distribution, similarly detailing probability changes as the logistic model. If the coefficient for treaty is positive, it can be interpreted as an increase in the probability of non-combatant deaths due to treaty signing.
+  **bin_mod5 (Cauchy link function)** uses a Cauchy distribution with long tails to emphasize the impact of extreme cases. If the treaty's coefficient is positive, it suggests that treaty signing could significantly affect the probability of non-combatant deaths.
+  **bin_mod6 (C-log-log link function)** is suitable for modeling cases where an event almost never happens or is almost certain. A positive coefficient for treaty means an increase in the probability of death upon treaty signing. This model fits well especially with data where death events are rare and showed the lowest AIC/BIC values, indicating the best fit.
+  **bin_mod7 and bin_mod8** use the Gosset and Pregibon link functions, respectively, to model the complex nonlinear relationships between treaty and ncdead01. These models reflect more complex forms of relationships and offer more flexible interpretation compared to the standard logistic or probit models.
+  Based on AIC and BIC, **bin_mod6 (using C-log-log link function)** recorded the lowest values and best explains the data. It is particularly suitable for modeling the occurrence of rare events, providing a clear understanding of the impact of treaty signing on the probability of non-combatant deaths. While logistic (bin_mod3) and probit (bin_mod4) models also performed well, the C-log-log link function is more advantageous for extremely skewed data.
+  Therefore, for predicting rare events like non-combatant deaths, **bin_mod6 (using C-log-log link function)** is most appropriate, and **bin_mod7 and bin_mod8** models can also be considered for exploring more complex nonlinear relationships.
+
+
+ 4. Finally, compare your chosen models with each other in terms of the
+    operating characteristics of their estimators (bias, precision, MSE) and
+    tests (false positive rates). You might find `DeclareDesign` a useful
+    package for that work. (Below I use just one estimator.)
+
+
+```{r}
+library(DeclareDesign)
+pop <- declare_population(wtd)
+
+## Should we imagine sampling from a population created by some parametric probability model?
+## If so, then whatever model we choose to use below will be the best without any need for
+## assessment (except if we worry about consistency problems --- which maybe we should worry about come to think about it)
+## Or imagine randomly assigning treaties? Or something else?
+
+## Here we imagine that the true effect is 40000 and that the baseline
+## variation in the outcome is coming from ncdead rather than some known process like a uniform or Normal dist
+
+outcomes <- declare_potential_outcomes(Y ~ 40000 * Z + ncdead, assignment_variables = "Z")
+
+## Imagining here that we are not sampling but swapping who signs a treaty
+assignment <- declare_assignment(Z = conduct_ra(m = 111, N = N))
+est1 <- declare_estimator(Y ~ Z, model = lm_robust, se_type = "classical")
+thereveal <- declare_reveal(Y, Z)
+estimand1 <- declare_inquiry(ATE = mean(Y_Z_1 - Y_Z_0))
+des <- pop + outcomes + assignment + estimand1 + thereveal + est1
+dat <- draw_data(des)
+estimand1(dat)
+
+thediag <- diagnose_design(des, bootstrap_sims = 0, sims = 1000)
+thediag
+```
+>Answer
+  The current model's Biasis 7,849.46, which indicates that it has overestimated the true average treatment effect (ATE = 40,000). This means the model does not accurately reflect the true effect. The Precision, represented by the SD Estimate, is 103,002.74, which is very high, suggesting that the estimates are inconsistent and volatile. RMSE is 103,250.03, reflecting both bias and variance, indicating poor quality of the model.
+  The Type I Error (False Positive Rate, FPR)refers to the rate of incorrectly judging a non-significant effect as significant when there is actually no effect. Although the FPR was not directly evaluated in the current design, the high bias and variability suggest an increased likelihood of a false positive rate. By utilizing the diagnose_design()function, the FPR of various models can be simulated to assess the reliability of each model.
+In conclusion, the provided results indicate that the current model exhibits significant bias and high variability, with a high RMSE, suggesting poor quality of estimation. Exploring alternative binary regression models could be a viable solution to improve this.
+
+
+# References
