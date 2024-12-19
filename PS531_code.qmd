@@ -1,0 +1,502 @@
+---
+title: "PS531_Code"
+format: html
+editor: visual
+---
+
+#### Load packages
+
+```{r}
+
+library(readxl)
+library(dplyr)
+library(tidyr)
+library(purrr)
+library(openxlsx)
+library(pscl)  # For zero-inflated models
+library(lme4)
+library(Matrix)
+library(stringr)
+library(plm)
+library(stargazer)
+library(conflicted)
+conflict_prefer("select", "dplyr")
+conflicted::conflicts_prefer(dplyr::filter)
+library(texreg)
+library(car)
+library(cobalt)
+library(MatchIt)
+library(RItools)
+library(DeclareDesign)
+```
+
+#### Load Data
+
+```{r}
+library(here)
+
+# GitHub Raw 파일 링크
+CNTS_url <- "https://raw.githubusercontent.com/Iluvchopin12/dailyR/main/CNTS_1.xlsx"
+polity_url <- "https://raw.githubusercontent.com/Iluvchopin12/dailyR/main/p5_1.xls"
+sanctions_url <- "https://raw.githubusercontent.com/Iluvchopin12/dailyR/main/GSDB_v3_1.xls"
+
+# Download and load files
+download.file(CNTS_url, destfile = "CNTS_1.xlsx", mode = "wb")
+download.file(polity_url, destfile = "p5_1.xls", mode = "wb")
+download.file(sanctions_url, destfile = "GSDB_v3_1.xls", mode = "wb")
+
+CNTS <- read_excel("CNTS_1.xlsx", col_names = FALSE)
+polity <- read_excel("p5_1.xls")
+sanctions <- read_excel("GSDB_v3_1.xls")
+
+head(CNTS, 6)
+head(polity, 6)
+head(sanctions,6 )
+```
+
+##### Data process: DV
+
+-   Counted are all incidents of anti-government demonstrations or riots with more than 100 participants and strikes with more than 1000 participants.
+
+-   domestic2(General Strikes), domestic6(Riots), domestic8(anti)
+
+```{r}
+CNTS <- CNTS[-1, ]  # Exclude the first row
+colnames(CNTS) <- CNTS[1, ]  # Set the first row as the column name
+
+# Create DV: domestic2 + domestic6 + domestic8 merge
+
+
+# Select the columns, create new variables
+
+##32-GDP,
+##6-national government expenditure per capita, 
+##1 - population,
+
+CNTS <- CNTS %>%
+  dplyr::select(country, year, domestic2, domestic6, domestic8, delta06, delta32, delta01)
+
+
+# Create a new variable
+## Treat selected columns as NA, convert to numeric, and create new variables
+CNTS <- CNTS %>%
+  mutate(
+    domestic2 = as.numeric(as.character(domestic2)),
+    domestic6 = as.numeric(as.character(domestic6)),
+    domestic8 = as.numeric(as.character(domestic8)),
+    demonstration = domestic2 + domestic6 + domestic8  # Create a new variable
+  )
+
+# Convert column 'year' to numeric and filter data from 1948 to 2018
+CNTS <- CNTS %>%
+  mutate(year = as.numeric(year)) %>%  # Convert column 'year' to numeric
+  filter(year >= 1948 & year <= 2018)  # Filter from 1948 to 2018
+
+
+# Logarithmic transformation of the delta variable
+CNTS$delta01 <- as.numeric(as.character(CNTS$delta01))
+CNTS$delta06 <- as.numeric(as.character(CNTS$delta06))
+CNTS$delta32 <- as.numeric(as.character(CNTS$delta32))
+
+# Define the Arcsinh conversion function 
+arcsinh_transform <- function(x) {
+  ifelse(is.na(x), NA, log(x + sqrt(x^2 + 1)))}
+
+# Apply Arcsinh transformation to all variables starting with delta
+CNTS$delta01 <- arcsinh_transform(CNTS$delta01)
+CNTS$delta06 <- arcsinh_transform(CNTS$delta06)
+CNTS$delta32 <- arcsinh_transform(CNTS$delta32)
+
+#check
+head(CNTS)
+
+```
+
+#### IV: polity
+
+-   #xrcomp: Opposition exists, contested through popular elections (0: time to replace, 1: hereditary/nominated 2: hereditary/election 3: election)
+
+<!-- -->
+
+-   xconst: Degree to which political participation is institutionalized or regulated
+
+```{r}
+polity <- polity %>% 
+  select(year, country, scode, polity2, democ, xrcomp, xconst, parcomp) %>% 
+  mutate(
+    regime_type = ifelse(polity2 <= -6, "Author",
+                         ifelse(polity2 >= 6, "Democ", "Hybrid"))
+  )
+
+# Create a dummy variable
+polity <- polity %>%
+  mutate(
+    is_authoritarian = ifelse(regime_type == "Author", 1, 0),
+    is_democratic = ifelse(regime_type == "Democ", 1, 0),
+    is_hybrid = ifelse(regime_type == "Hybrid", 1, 0)
+  )
+
+# Check
+head(polity)
+```
+
+#### IV: Imposition of Economic Sanctions
+
+```{r}
+# Create basic time series data that includes all countries and years
+years <- 1949:2018
+countries <- unique(sanctions$sanctioned_state)  # Extract distinguished names for each country
+
+# Combine all countries and years to create time series data
+time_series <- expand.grid(country = countries, year = years)
+
+# Extending time series data
+sanctions_long <- sanctions %>%
+  group_by(sanctioned_state) %>%
+  mutate(year = map2(begin, end, seq)) %>%  # Expand data by year from start year to end year
+  unnest(cols = year) %>%  # Expanding data by year
+  arrange(sanctioned_state, year)  # Sort by country, then sort by year
+
+# Combine time series data with traditional data
+sanctions_full <- time_series %>%
+  left_join(sanctions_long, by = c("country" = "sanctioned_state", "year"))
+
+valid_case <- sanctions_full %>%
+  filter(!is.na(case_id)) %>% 
+  nrow()
+
+# NA treatment
+sanctions_full <- sanctions_full %>%
+  replace_na(list(trade = 0, arms = 0, military = 0, financial = 0, travel = 0, other = 0, target_multi = 0, sender_multi = 0, objective = "none", success = "none")) 
+
+summary(sanctions_full)
+names(sanctions_full)
+
+## Combine multiple runs from the same year into a single run 
+sanctions_aggregated <- sanctions_full %>%
+  group_by(country, year) %>%
+  summarise(
+    senders_combined = paste(unique(sanctioning_state), collapse = ", "),  # Combine sanctioned entities into a string
+    has_un = ifelse("UN" %in% sanctioning_state, 1, 0),  # Whether to include the United Nations (UN)
+    has_us = ifelse("United States" %in% sanctioning_state, 1, 0),  # Include US or not
+    trade_sum = sum(trade, na.rm = TRUE),  # Aggregate transaction-related variables
+    arms_sum = sum(arms, na.rm = TRUE),  # Aggregate weapon-related variables
+    military_sum = sum(military, na.rm = TRUE),  # Aggregate military-related variables
+    financial_sum = sum(financial, na.rm = TRUE),  # Aggregate financial variables
+    .groups = "drop" 
+  )
+
+
+# create smart_sanctions variable (1 if any of arms, military, financial is 1, otherwise 0)
+sanctions_aggregated <- sanctions_aggregated %>%
+  mutate(
+    smart_sanctions = ifelse(arms_sum >= 1 | military_sum >= 1 | financial_sum >= 1, 1, 0)
+  )
+
+sanctions_aggregated <- sanctions_aggregated %>%
+  mutate(
+    trade_sanctions = ifelse(trade_sum >= 1, 1, 0)
+  )
+
+summary(sanctions_aggregated)
+
+# Add a variable to determine if a full sanction is present
+sanctions_aggregated <- sanctions_aggregated %>%
+  mutate(
+    presence_of_sanctions = ifelse(trade_sum >= 1 | arms_sum >= 1 | military_sum >= 1 | financial_sum >= 1, 1, 0)
+  )
+
+head(santions_aggregated)
+```
+
+#### Merge data & Save data
+
+```{r}
+combined_data <- left_join(sanctions_aggregated, polity, by = c("country", "year"))
+combined_data <- left_join(combined_data, CNTS, by = c("country", "year"))
+summary(combined_data)
+names(combined_data)
+
+# Save the dataframe as an Excel file
+write.xlsx(combined_data, "combined_data.xlsx")
+combined_data <- read.xlsx("combined_data.xlsx")
+
+```
+
+#### Descriptive analysis
+
+```{r}
+
+#### variables descriptive statistics ####
+
+# Subset the data for the selected variables
+selected_vars <- combined_data[, c("presence_of_sanctions", "smart_sanctions", "has_un", "polity2")]
+
+# Calculate summary statistics
+summary_stats <- data.frame(
+  Variable = c("presence_of_sanctions", "smart_sanctions", "has_un", "polity2"),
+  N = c(sum(!is.na(selected_vars$presence_of_sanctions)),  # Total count of non-missing values
+        sum(selected_vars$smart_sanctions == 1, na.rm = TRUE),  # Count where value is 1
+        sum(selected_vars$has_un == 1, na.rm = TRUE),  # Count where value is 1
+        sum(!is.na(selected_vars$polity2))),  # Total count of non-missing values
+  Mean = sapply(selected_vars, mean, na.rm = TRUE),
+  Std_Dev = sapply(selected_vars, sd, na.rm = TRUE),
+  Min = sapply(selected_vars, min, na.rm = TRUE),
+  Max = sapply(selected_vars, max, na.rm = TRUE)
+)
+
+# Use stargazer to create a LaTeX table
+stargazer(summary_stats, type = "text", summary = FALSE,
+          title = "Summary Statistics for Selected Variables",
+          digits = 3, out = "summary_stats.tex")
+
+summary_stats <- combined_data %>%
+  group_by(regime_type) %>%
+  summarise(
+    count_has_un = sum(has_un, na.rm = TRUE),   
+    count_has_us = sum(has_us, na.rm = TRUE),   
+    count_smart_sanctions = sum(smart_sanctions, na.rm = TRUE), 
+    count_trade_sanctions = sum(trade_sanctions, na.rm = TRUE), 
+    count_presence_of_sanctions = sum(presence_of_sanctions, na.rm = TRUE) # 
+  )
+
+summary_stats
+
+#Visulaization
+
+data <- combined_data %>%
+  select(country, year, presence_of_sanctions) %>% 
+  mutate(presence_of_sanctions = as.factor(presence_of_sanctions)) 
+
+# Create a tile graph
+ggplot(data, aes(x = year, y = country, fill = presence_of_sanctions)) +
+  geom_tile(color = "white") +  
+  scale_fill_manual(values = c("0" = "lightblue", "1" = "red"),
+                    name = "Sanctions",
+                    labels = c("No Sanction", "Sanctioned")) +
+  labs(
+    title = "Presence of Sanctions Over Time by Country",
+    x = "Year",
+    y = "Country"
+  ) +
+  theme_minimal() +
+  theme(axis.text.y = element_text(size = 6))
+```
+
+#### Matching
+
+```{r}
+#covariance: 
+##GDP(delta32), national government expenditure(delta06)
+##xrcomp, xconst, polity2
+
+
+names(combined_data)
+
+match_data <- combined_data %>%
+  select(country, year, presence_of_sanctions, delta32, delta06, demonstration, has_us, has_un, smart_sanctions, trade_sanctions, regime_type, xrcomp, xconst, polity2)
+
+# Remove missing values
+match_data <- na.omit(match_data)
+
+# Rename the disposition variable
+match_data <- match_data %>%
+  rename(treatment = presence_of_sanctions)
+
+nrow(match_data)
+
+
+# Perform propensity score matching + Mahalanobis 
+set.seed(0512)
+psm_model <- matchit(
+  treatment ~ delta32 + delta06 + xrcomp + xconst + polity2,
+  data = match_data, 
+  method = "nearest",             
+  distance = "logit",            
+  mahvars = ~ delta32 + delta06 + xrcomp + xconst + polity2,  
+  caliper = 0.05,                    
+  std.caliper = TRUE               
+)
+
+# Check matching results
+summary(psm_model)
+
+
+# Evaluate the balance of matching results
+bal.tab(psm_model, un = TRUE)  
+
+love.plot(psm_model, stats = c("mean.diffs"), thresholds = c(m = 0.1))
+
+
+
+# Extract matched data
+matched_data <- match.data(psm_model)
+
+# Perform a balancing test
+balance_result <- balanceTest(treatment ~ delta32 + delta06 + xrcomp + xconst + polity2, 
+                              data = matched_data, 
+                              p.adjust.method = "none")
+
+# See full results
+balance_result
+
+# Check results by variable
+balance_result$results
+
+
+
+##Calculate the cumulative risk of one type of error
+# variables
+n <- 5
+alpha <- 0.05
+# Calculate the cumulative probability of 1 type error
+type1_error_rate <- 1 - (1 - alpha)^n
+type1_error_rate
+
+
+
+# Check the structure of the object
+str(balance_result)        
+str(balance_result$results) 
+colnames(balance_result$results)
+dimnames(balance_result$results)
+# extract p-value
+p_values <- balance_result$results[, "p", "--"]
+p_values
+
+#holm multiple comparison correction
+adjusted_p_holm <- p.adjust(p_values, method = "holm")
+print(adjusted_p_holm)
+
+love.plot(psm_model, stats = "mean.diffs", thresholds = 0.1)
+
+```
+
+#### Analysis
+
+##### H1
+
+```{r}
+
+# Create a Negative Binomial model
+model <- glm.nb(demonstration ~ lag(demonstration, 2) + smart_sanctions + trade_sanctions + 
+    I(polity2^2) + polity2, data = matched_data, link = log)
+
+# summarize results
+summary(model)
+
+vif(model)
+
+
+# Graph 
+##generate a value for polity2 (from -10 to 10)
+polity2_values <- seq(-10, 10, by = 0.1)
+
+# Extract model coefficients
+coefficients <- coef(model)
+
+# Predict the incidence of protests
+predicted_log <- coefficients["(Intercept)"] +
+  coefficients["polity2"] * polity2_values +
+  coefficients["I(polity2^2)"] * (polity2_values^2)
+predicted_rate <- exp(predicted_log)
+
+# Generate graph data
+plot_data <- data.frame(polity2 = polity2_values, rate = predicted_rate)
+
+library(ggplot2)
+ggplot(plot_data, aes(x = polity2, y = rate)) +
+  geom_line(color = "blue", size = 1) +
+  labs(
+    title = "Relationship between Polity score and protest incidence",
+    x = "Polity2",
+    y = "Predicted protest rate"
+  ) +
+  theme_minimal()
+
+```
+
+##### H2
+
+```{r}
+
+model2 <- glm.nb(demonstration ~ lag(demonstration, 2) + has_un + + has_us + polity2 + I(polity2^2), data = matched_data, link = log)
+
+summary(model2)
+
+```
+
+#### MSE Check
+
+```{r}
+ 예: true_effect = 0.5 라 가정
+true_effect <- 0.5
+
+simulate_once <- function(true_effect, matched_data) {
+  # Assuming that matched_data is the covariate-balanced data used in the actual analysis.
+
+  n <- nrow(matched_data)
+  X <- model.matrix(~ delta32 + delta06 + xrcomp + xconst + polity2, data=matched_data)
+  
+ 
+  beta <- rep(0, ncol(X)) 
+  treat <- matched_data$treatment
+
+  lambda <- exp(X %*% beta + treat*true_effect) 
+  theta <- 2
+  y_sim <- rnegbin(n, mu=lambda, theta=theta)
+  
+  sim_data <- cbind(matched_data, demonstration=y_sim)
+  
+  # (2) Regress NB again on simulated data
+  fit <- glm.nb(demonstration ~ treatment + delta32 + delta06 + xrcomp + xconst + polity2, data=sim_data)
+  
+  # (2) Regress NB again on simulated data
+  est <- coef(fit)["treatment"]
+  return(est)
+}
+
+# Repeat the simulation
+set.seed(123)
+nsim <- 100
+estimates <- numeric(nsim)
+for(i in 1:nsim) {
+  estimates[i] <- simulate_once(true_effect, matched_data)
+}
+
+# Calculate Bias, MSE
+bias <- mean(estimates) - true_effect
+mse <- mean((estimates - true_effect)^2)
+
+cat("Bias:", bias, "\nMSE:", mse, "\n")
+
+```
+
+#### Results
+
+```{r}
+# Generate a table of results for both models
+stargazer(model, model2, type="text",
+          title="Negative Binomial Regression Results",
+          dep.var.labels = "Number of Demonstrations",
+          covariate.labels = c("Lag Demonstration (t-2)",
+                               "Smart Sanctions",
+                               "Trade Sanctions",
+                               "UN Sanction",
+                               "US Sanction",
+                               "Polity2",
+                               "Polity2 Squared"),
+          omit.stat = c("f","ser"), 
+          no.space=TRUE)
+
+
+
+ggplot(plot_data, aes(x = polity2, y = rate)) +
+  geom_line(color = "blue", size = 1) +
+  labs(
+    title = "Predicted Protest Rate by Polity Score",
+    x = "Polity2",
+    y = "Predicted Protest Rate"
+  ) +
+  theme_minimal()
+```
